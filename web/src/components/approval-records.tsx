@@ -7,6 +7,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   ClipboardListIcon,
   CopyIcon,
   RefreshCwIcon,
@@ -232,7 +233,7 @@ function ScriptFileSnapshot({ file }: { file: NonNullable<InterceptReviewInput["
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
           >
-            <ChevronDownIcon data-icon="inline-start" className={cn("transition-transform", open && "rotate-180")} />
+            {open ? <ChevronUpIcon data-icon="inline-start" /> : <ChevronDownIcon data-icon="inline-start" />}
             查看脚本内容
           </Button>
           {open ? <CodeBlock label="脚本内容（审查快照）" text={file.content} /> : null}
