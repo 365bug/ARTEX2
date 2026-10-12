@@ -442,7 +442,7 @@ export function ApprovalDetail({
         "为什么这次被放行或拦截？",
         "脚本中有哪些未确定行为？",
       ]}
-      className="min-h-[460px]"
+      className={cn(side.open ? "min-h-[460px]" : "min-h-0")}
       mainClassName="overflow-visible"
     >
       <div className="flex min-w-0 flex-col gap-4 p-3 sm:p-5">
