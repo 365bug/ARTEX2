@@ -251,6 +251,8 @@ export function SideQuestionWorkspace({
   composerLayout = "stacked",
   suggestions,
   placeholder,
+  className,
+  mainClassName,
 }: {
   side: SideQuestions;
   label: string;
@@ -258,12 +260,18 @@ export function SideQuestionWorkspace({
   composerLayout?: ComposerLayout;
   suggestions?: string[];
   placeholder?: string;
+  className?: string;
+  mainClassName?: string;
 }) {
   const mobile = useIsMobile();
   return (
     <>
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
-        <ResizablePanel id="main-conversation" minSize="35%" className="flex min-h-0 min-w-0 flex-col">
+      <ResizablePanelGroup orientation="horizontal" className={cn("min-h-0 min-w-0 flex-1", className)}>
+        <ResizablePanel
+          id="main-conversation"
+          minSize="35%"
+          className={cn("flex min-h-0 min-w-0 flex-col", mainClassName)}
+        >
           {children}
         </ResizablePanel>
         {side.open && side.enabled && !mobile && (
