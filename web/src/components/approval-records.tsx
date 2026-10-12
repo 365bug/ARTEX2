@@ -206,30 +206,39 @@ function ScriptSnapshotSummary({ input }: { input: InterceptReviewInput }) {
         </Badge>
       </div>
       {files.map((file) => (
-        <div key={file.path} className="flex min-w-0 flex-col gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <code className="break-all">{file.path}</code>
-            {file.sha256 ? <span className="text-muted-foreground">SHA-256 {file.sha256.slice(0, 12)}…</span> : null}
-            {file.bytes != null ? <span className="text-muted-foreground">{file.bytes} 字节</span> : null}
-          </div>
-          {file.read_error ? <p className="text-destructive text-xs">{file.read_error}</p> : null}
-          {file.content ? (
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="self-start px-0">
-                  <ChevronDownIcon data-icon="inline-start" />
-                  查看脚本内容
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
-                <CodeBlock label="脚本内容（审查快照）" text={file.content} />
-              </CollapsibleContent>
-            </Collapsible>
-          ) : null}
-        </div>
+        <ScriptFileSnapshot key={file.path} file={file} />
       ))}
       <p className="text-muted-foreground text-xs">这是执行前实际发送给审查模型的脚本快照。</p>
     </section>
+  );
+}
+
+function ScriptFileSnapshot({ file }: { file: NonNullable<InterceptReviewInput["script_files"]>[number] }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="flex min-w-0 flex-col gap-2 overflow-visible">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <code className="break-all">{file.path}</code>
+        {file.sha256 ? <span className="text-muted-foreground">SHA-256 {file.sha256.slice(0, 12)}…</span> : null}
+        {file.bytes != null ? <span className="text-muted-foreground">{file.bytes} 字节</span> : null}
+      </div>
+      {file.read_error ? <p className="text-destructive text-xs">{file.read_error}</p> : null}
+      {file.content ? (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="self-start px-0"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <ChevronDownIcon data-icon="inline-start" className={cn("transition-transform", open && "rotate-180")} />
+            查看脚本内容
+          </Button>
+          {open ? <CodeBlock label="脚本内容（审查快照）" text={file.content} /> : null}
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -959,7 +968,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
         </Alert>
       ) : null}
       {pending.length ? (
-        <section className="overflow-hidden rounded-xl border">
+        <section className="rounded-xl border">
           <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3 font-medium text-sm">
             <ShieldAlertIcon className="size-4" />
             待处理（{pending.length}）<span className="text-muted-foreground text-xs">展开后允许或拒绝</span>
@@ -967,7 +976,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
           <ApprovalTable rows={pending} busy={deciding} decide={decide} revision={revision} label="待处理审批" />
         </section>
       ) : null}
-      <section className="overflow-hidden rounded-xl border">
+      <section className="rounded-xl border">
         <div className="border-b px-4 py-3 font-medium text-sm">
           {filtered ? "筛选结果" : "全部记录"}（{total}）
         </div>
