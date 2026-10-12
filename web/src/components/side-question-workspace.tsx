@@ -288,7 +288,7 @@ export function SideQuestionWorkspace({
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
-        <div className={cn("w-full min-w-0", className, mainClassName)}>{children}</div>
+        <div className={cn("flex min-h-0 w-full min-w-0 flex-1 flex-col", className, mainClassName)}>{children}</div>
       )}
       <Drawer open={mobile && side.open && side.enabled} onOpenChange={side.setOpen}>
         <DrawerContent className="h-[85svh]">
