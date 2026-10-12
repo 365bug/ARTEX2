@@ -209,7 +209,7 @@ function ScriptSnapshotSummary({ input }: { input: InterceptReviewInput }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium text-sm">审查脚本快照</h3>
         <Badge variant={input.script_capture_status === "incomplete" ? "destructive" : "secondary"}>
-          {input.script_capture_status === "incomplete" ? "读取不完整 · 需人工确认" : "已附加"}
+          {input.script_capture_status === "incomplete" ? "读取不完整" : "已附加"}
         </Badge>
       </div>
       {files.map((file) => (
@@ -311,7 +311,7 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
           ))}
           {input.script_capture_status === "incomplete" ? (
             <Alert variant="destructive">
-              <AlertDescription>无法完整读取当前执行脚本，平台要求人工确认。</AlertDescription>
+              <AlertDescription>无法完整读取当前执行脚本；默认转人工审查，也可以在模型设置中继续交给审查模型。</AlertDescription>
             </Alert>
           ) : null}
         </section>

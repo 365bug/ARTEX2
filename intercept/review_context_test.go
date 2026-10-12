@@ -179,6 +179,29 @@ func TestReviewInputShellCommandCombinations(t *testing.T) {
 	}
 }
 
+func TestIncompleteScriptPolicy(t *testing.T) {
+	incomplete := ReviewInput{ScriptCaptureStatus: "incomplete"}
+	for _, tc := range []struct {
+		name, policy, action, wantAction string
+	}{
+		{name: "default human review", policy: "ask", action: "allow", wantAction: "ask"},
+		{name: "model review", policy: "model", action: "allow", wantAction: "allow"},
+		{name: "model deny remains deny", policy: "model", action: "deny", wantAction: "deny"},
+		{name: "complete allow remains allow", policy: "ask", action: "allow", wantAction: "allow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := incomplete
+			if tc.name == "complete allow remains allow" {
+				input.ScriptCaptureStatus = "complete"
+			}
+			got := applyIncompleteScriptPolicy(input, Decision{Action: tc.action}, tc.policy)
+			if got.Action != tc.wantAction {
+				t.Fatalf("action=%q want %q", got.Action, tc.wantAction)
+			}
+		})
+	}
+}
+
 func TestReviewInputResolvesCdAndSourceScript(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "login.sh")

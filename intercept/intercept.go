@@ -308,6 +308,7 @@ const (
 	settingJudgeFailAction       = "llm_judge_fail_action"
 	settingJudgeAskTimeoutSecs   = "llm_judge_ask_timeout_seconds"
 	settingJudgeAskTimeoutAction = "llm_judge_ask_timeout_action"
+	settingJudgeIncompleteScript = "llm_judge_incomplete_script_action"
 )
 
 // Judge default values.
@@ -321,13 +322,14 @@ const (
 // JudgeConfig is the resolved LLM-fallback-judge configuration. Prompt is always
 // non-empty (falls back to DefaultJudgePrompt).
 type JudgeConfig struct {
-	Enabled           bool   `json:"enabled"`
-	ProfileID         int64  `json:"profile_id"` // 0 = follow active/default
-	Prompt            string `json:"prompt"`
-	TimeoutSeconds    int    `json:"timeout_seconds"`
-	FailAction        string `json:"fail_action"` // allow|ask|deny
-	AskTimeoutSeconds int    `json:"ask_timeout_seconds"`
-	AskTimeoutAction  string `json:"ask_timeout_action"` // allow|deny
+	Enabled                bool   `json:"enabled"`
+	ProfileID              int64  `json:"profile_id"` // 0 = follow active/default
+	Prompt                 string `json:"prompt"`
+	TimeoutSeconds         int    `json:"timeout_seconds"`
+	FailAction             string `json:"fail_action"` // allow|ask|deny
+	AskTimeoutSeconds      int    `json:"ask_timeout_seconds"`
+	AskTimeoutAction       string `json:"ask_timeout_action"`       // allow|deny
+	IncompleteScriptAction string `json:"incomplete_script_action"` // ask|model
 }
 
 // judgeConfig reads the judge configuration from settings, applying defaults for
@@ -335,12 +337,13 @@ type JudgeConfig struct {
 // follows dwarfs a few KV reads, and freshness avoids a cache-invalidation path.
 func (i *Interceptor) judgeConfig() JudgeConfig {
 	c := JudgeConfig{
-		Enabled:           i.db.GetBool(settingJudgeEnabled, false),
-		ProfileID:         int64(i.getSettingInt(settingJudgeProfileID, 0)),
-		TimeoutSeconds:    i.getSettingInt(settingJudgeTimeoutSecs, defaultJudgeTimeoutSecs),
-		FailAction:        i.getSettingChoice(settingJudgeFailAction, defaultJudgeFailAction, "allow", "ask", "deny"),
-		AskTimeoutSeconds: i.getSettingInt(settingJudgeAskTimeoutSecs, defaultJudgeAskTimeoutSecs),
-		AskTimeoutAction:  i.getSettingChoice(settingJudgeAskTimeoutAction, defaultJudgeAskTimeoutAction, "allow", "deny"),
+		Enabled:                i.db.GetBool(settingJudgeEnabled, false),
+		ProfileID:              int64(i.getSettingInt(settingJudgeProfileID, 0)),
+		TimeoutSeconds:         i.getSettingInt(settingJudgeTimeoutSecs, defaultJudgeTimeoutSecs),
+		FailAction:             i.getSettingChoice(settingJudgeFailAction, defaultJudgeFailAction, "allow", "ask", "deny"),
+		AskTimeoutSeconds:      i.getSettingInt(settingJudgeAskTimeoutSecs, defaultJudgeAskTimeoutSecs),
+		AskTimeoutAction:       i.getSettingChoice(settingJudgeAskTimeoutAction, defaultJudgeAskTimeoutAction, "allow", "deny"),
+		IncompleteScriptAction: i.getSettingChoice(settingJudgeIncompleteScript, "ask", "ask", "model"),
 	}
 	// Prompt: stored value if non-empty, else the built-in template.
 	if v, ok, _ := i.db.GetSetting(settingJudgePrompt); ok && strings.TrimSpace(v) != "" {
@@ -417,6 +420,9 @@ func (i *Interceptor) SetJudgeConfig(c JudgeConfig) error {
 	if err := i.db.SetSetting(settingJudgeAskTimeoutAction, c.AskTimeoutAction); err != nil {
 		return err
 	}
+	if err := i.db.SetSetting(settingJudgeIncompleteScript, c.IncompleteScriptAction); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -458,14 +464,10 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 	if err != nil {
 		out = Decision{ProfileID: out.ProfileID, ModelFallback: true, Action: cfg.FailAction, Message: "模型审批失败,按失败策略处理: " + err.Error()}
 	}
-	// A script invocation whose source could not be captured is never safe to
-	// auto-allow: the model must not infer that an opaque or partial script has
-	// no side effects. Preserve an explicit deny, but convert an allow (including
-	// a configured fail-open response) into human review.
-	if input.ScriptCaptureStatus == "incomplete" && out.Action == "allow" {
-		out.Action = "ask"
-		out.Message = "脚本未能完整附加，无法排除隐藏副作用，需要人工确认"
-	}
+	// By default an incomplete script snapshot requires human review. Operators
+	// may explicitly choose model review; in that mode the model receives the
+	// read errors/partial snapshot and its verdict is honored.
+	out = applyIncompleteScriptPolicy(input, out, cfg.IncompleteScriptAction)
 	switch out.Action {
 	case "allow", "ask", "deny":
 		// valid verdict
@@ -495,6 +497,14 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 		out.TimeoutAction = cfg.AskTimeoutAction
 	}
 	return out, true
+}
+
+func applyIncompleteScriptPolicy(input ReviewInput, out Decision, policy string) Decision {
+	if input.ScriptCaptureStatus == "incomplete" && policy != "model" && out.Action == "allow" {
+		out.Action = "ask"
+		out.Message = "脚本未能完整附加，无法排除隐藏副作用，需要人工确认"
+	}
+	return out
 }
 
 func judgeActionLabel(action string) string {
