@@ -1480,6 +1480,16 @@ export interface LLMTask {
 // The exact JSON sent to the review model, retained for all model verdicts.
 export interface InterceptReviewInput {
   version: number;
+  script_capture_status?: "not_applicable" | "complete" | "incomplete";
+  script_files?: {
+    path: string;
+    sha256?: string;
+    bytes?: number;
+    content?: string;
+    complete?: boolean;
+    truncated?: boolean;
+    read_error?: string;
+  }[];
   background?: {
     // worker_summary is retained only for immutable v2/v3 snapshots.
     source: "user_message" | "worker_summary";

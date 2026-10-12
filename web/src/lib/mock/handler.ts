@@ -2250,7 +2250,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };
   if (path === "/settings/basic-auth" && m === "GET") return { enabled: false, username: "", password_set: false };
-  if (path === "/settings/basic-auth" && m === "PUT") throw new Error("演示模式不支持修改 HTTP Basic Auth，请在实际部署中配置");
+  if (path === "/settings/basic-auth" && m === "PUT")
+    throw new Error("演示模式不支持修改 HTTP Basic Auth，请在实际部署中配置");
   if (path === "/settings/web-search/test") return { ok: true, count: 5, backend: D.settings.web_search_backend };
   if (path === "/settings/python/detect") return { python_interpreter: "/usr/bin/python3" };
   if (path === "/chat")
@@ -2508,7 +2509,36 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   // ── 旁路提问(/btw)：demo 无旁路会话 ──
   // 必须显式命中：路径以 s 结尾会被下面的读兜底判成集合返回 []，items 就成了 undefined。
   if (seg.at(-1) === "side-questions") {
-    if (m === "GET") return { items: [], current: null, next_cursor: 0, snapshot: null };
+    if (m === "GET") {
+      if (seg[0] === "intercept" && seg[1] === "history") {
+        return {
+          items: [],
+          current: null,
+          next_cursor: 0,
+          snapshot: {
+            captured_at: new Date().toISOString(),
+            model: { model: "demo-review", name: "审查模型", format: "openai", profile_id: 1 },
+            available: true,
+            reason: "",
+          },
+        };
+      }
+      return { items: [], current: null, next_cursor: 0, snapshot: null };
+    }
+    if (m === "POST" && seg[0] === "intercept" && seg[1] === "history") {
+      return {
+        id: `approval-btw-${Date.now()}`,
+        ordinal: Date.now(),
+        client_request_id: b.client_request_id,
+        question: b.question,
+        answer: "演示模式：此旁路回答基于当前审批记录中的命令、用户消息和脚本快照。",
+        status: "completed",
+        model: { model: "demo-review", name: "审查模型", format: "openai", profile_id: 1 },
+        snapshot_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        sequence: 1,
+      };
+    }
     if (m === "POST") throw new Error("演示模式不支持旁路提问");
   }
 

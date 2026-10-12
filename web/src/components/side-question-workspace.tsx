@@ -51,10 +51,14 @@ function SidePanel({
   side,
   label,
   composerLayout,
+  suggestions,
+  placeholder,
 }: {
   side: SideQuestions;
   label: string;
   composerLayout: ComposerLayout;
+  suggestions?: string[];
+  placeholder?: string;
 }) {
   const inlineComposer = composerLayout === "inline";
   const [confirm, setConfirm] = useState(false);
@@ -164,7 +168,7 @@ function SidePanel({
             rows={1}
             className={cn("overflow-y-auto", inlineComposer ? "max-h-40 min-h-0" : "max-h-36 min-h-9")}
             aria-label="旁路问题"
-            placeholder="询问当前上下文…"
+            placeholder={placeholder ?? "询问当前上下文…"}
             value={side.draft}
             maxLength={4000}
             disabled={side.busy}
@@ -202,6 +206,22 @@ function SidePanel({
             )}
           </InputGroupAddon>
         </InputGroup>
+        {suggestions?.length ? (
+          <fieldset className="mt-2 flex flex-wrap gap-1.5" aria-label="快捷问题">
+            {suggestions.map((suggestion) => (
+              <Button
+                key={suggestion}
+                variant="outline"
+                size="sm"
+                className="h-auto whitespace-normal text-left text-xs"
+                disabled={side.busy || !side.snapshot?.available}
+                onClick={() => void side.ask(suggestion)}
+              >
+                {suggestion}
+              </Button>
+            ))}
+          </fieldset>
+        ) : null}
       </div>
       {inlineComposer && (
         <div className="shrink-0 truncate px-3 pt-0.5 pb-1 text-muted-foreground text-xs">独立问答 · 无工具执行</div>
@@ -229,11 +249,15 @@ export function SideQuestionWorkspace({
   label,
   children,
   composerLayout = "stacked",
+  suggestions,
+  placeholder,
 }: {
   side: SideQuestions;
   label: string;
   children: ReactNode;
   composerLayout?: ComposerLayout;
+  suggestions?: string[];
+  placeholder?: string;
 }) {
   const mobile = useIsMobile();
   return (
@@ -246,7 +270,13 @@ export function SideQuestionWorkspace({
           <>
             <ResizableHandle withHandle />
             <ResizablePanel id="side-question" defaultSize="38%" minSize="280px" maxSize="65%">
-              <SidePanel side={side} label={label} composerLayout={composerLayout} />
+              <SidePanel
+                side={side}
+                label={label}
+                composerLayout={composerLayout}
+                suggestions={suggestions}
+                placeholder={placeholder}
+              />
             </ResizablePanel>
           </>
         )}
@@ -257,7 +287,13 @@ export function SideQuestionWorkspace({
             <DrawerTitle>旁路提问</DrawerTitle>
             <DrawerDescription>{label} 的独立问答</DrawerDescription>
           </DrawerHeader>
-          <SidePanel side={side} label={label} composerLayout={composerLayout} />
+          <SidePanel
+            side={side}
+            label={label}
+            composerLayout={composerLayout}
+            suggestions={suggestions}
+            placeholder={placeholder}
+          />
         </DrawerContent>
       </Drawer>
     </>
