@@ -264,31 +264,32 @@ export function SideQuestionWorkspace({
   mainClassName?: string;
 }) {
   const mobile = useIsMobile();
+  const desktopSideOpen = side.open && side.enabled && !mobile;
   return (
     <>
-      <ResizablePanelGroup orientation="horizontal" className={cn("min-h-0 min-w-0 flex-1", className)}>
-        <ResizablePanel
-          id="main-conversation"
-          minSize="35%"
-          className={cn("flex min-h-0 min-w-0 flex-col", mainClassName)}
-        >
-          {children}
-        </ResizablePanel>
-        {side.open && side.enabled && !mobile && (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel id="side-question" defaultSize="38%" minSize="280px" maxSize="65%">
-              <SidePanel
-                side={side}
-                label={label}
-                composerLayout={composerLayout}
-                suggestions={suggestions}
-                placeholder={placeholder}
-              />
-            </ResizablePanel>
-          </>
-        )}
-      </ResizablePanelGroup>
+      {desktopSideOpen ? (
+        <ResizablePanelGroup orientation="horizontal" className={cn("min-h-0 min-w-0 flex-1", className)}>
+          <ResizablePanel
+            id="main-conversation"
+            minSize="35%"
+            className={cn("flex min-h-0 min-w-0 flex-col", mainClassName)}
+          >
+            {children}
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel id="side-question" defaultSize="38%" minSize="280px" maxSize="65%">
+            <SidePanel
+              side={side}
+              label={label}
+              composerLayout={composerLayout}
+              suggestions={suggestions}
+              placeholder={placeholder}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className={cn("w-full min-w-0", className, mainClassName)}>{children}</div>
+      )}
       <Drawer open={mobile && side.open && side.enabled} onOpenChange={side.setOpen}>
         <DrawerContent className="h-[85svh]">
           <DrawerHeader className="sr-only">
