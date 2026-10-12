@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DateSelect } from "@/components/date-select";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TablePagination } from "@/components/table-pagination";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -963,21 +964,23 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
           </div>
         </Field>
         <Field className="w-full sm:w-40">
-          <FieldLabel htmlFor={`${filterID}-from`}>申请时间从</FieldLabel>
-          <Input
-            id={`${filterID}-from`}
-            type="date"
+          <FieldLabel>审批时间从</FieldLabel>
+          <DateSelect
             value={fromDate}
-            onChange={(event) => changeDate("from", event.target.value)}
+            onValueChange={(value) => changeDate("from", value)}
+            optional
+            placeholder="选择开始日期"
+            aria-label="审批时间从"
           />
         </Field>
         <Field className="w-full sm:w-40">
-          <FieldLabel htmlFor={`${filterID}-to`}>申请时间至</FieldLabel>
-          <Input
-            id={`${filterID}-to`}
-            type="date"
+          <FieldLabel>审批时间至</FieldLabel>
+          <DateSelect
             value={toDate}
-            onChange={(event) => changeDate("to", event.target.value)}
+            onValueChange={(value) => changeDate("to", value)}
+            optional
+            placeholder="选择结束日期"
+            aria-label="审批时间至"
           />
         </Field>
         <Field className="w-full sm:w-40">
