@@ -30,6 +30,21 @@ func staticWord(w *syntax.Word) (string, bool) {
 	}
 	return staticParts(w.Parts)
 }
+
+// staticCommandName is like staticWord, but also accepts the POSIX test
+// builtin `[` as a command name. `[` is a valid executable name, while the
+// wildcard guard in staticParts intentionally rejects brackets in paths.
+func staticCommandName(w *syntax.Word) (string, bool) {
+	if value, ok := staticWord(w); ok {
+		return value, true
+	}
+	if w != nil && len(w.Parts) == 1 {
+		if lit, ok := w.Parts[0].(*syntax.Lit); ok && (lit.Value == "[" || lit.Value == "[[") {
+			return lit.Value, true
+		}
+	}
+	return "", false
+}
 func staticParts(parts []syntax.WordPart) (string, bool) {
 	var b strings.Builder
 	for _, part := range parts {
@@ -105,7 +120,7 @@ func scriptReferences(command, dir string, depth int) []scriptReference {
 		if len(args) == 0 {
 			return true
 		}
-		name, ok := staticWord(args[0])
+		name, ok := staticCommandName(args[0])
 		if !ok {
 			refs = append(refs, scriptReference{problem: "动态命令入口，无法确定是否执行脚本"})
 			return true
@@ -123,7 +138,7 @@ func scriptReferences(command, dir string, depth int) []scriptReference {
 				}
 				args = args[1:]
 			}
-			name, ok = staticWord(args[0])
+			name, ok = staticCommandName(args[0])
 			if !ok {
 				refs = append(refs, scriptReference{problem: "包装命令的执行入口不确定"})
 				return true

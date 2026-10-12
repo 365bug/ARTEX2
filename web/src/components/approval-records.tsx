@@ -116,13 +116,16 @@ function StatusBadge({ status }: { status: string }) {
 
 function MatchCell({ row, showReason = true }: { row: InterceptApprovalRow; showReason?: boolean }) {
   const reason = row.reason?.replace(/^\[模型\]\s*/, "");
+  const decisionSource = source(row);
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      {source(row) === "model" ? (
+      {decisionSource === "model" ? (
         <Badge variant="outline">
           <BotIcon />
           模型判定
         </Badge>
+      ) : decisionSource === "manual" ? (
+        <Badge variant="outline">人工判定</Badge>
       ) : (
         <span className="truncate">{row.rule_name || "规则未记录或已删除"}</span>
       )}
@@ -424,7 +427,7 @@ export function ApprovalDetail({
   if (row.status === "pending") execution = "尚未执行";
   if (audit && audit.correlation !== "exact" && audit.effective_action === "allow") execution = "未关联执行结果";
   const command = typeof row.tool_input?.command === "string" ? row.tool_input.command : undefined;
-  let initialLabel = source(row) === "model" ? "模型初判" : "规则初判";
+  let initialLabel = source(row) === "model" ? "模型初判" : source(row) === "manual" ? "人工判定" : "规则初判";
   if (audit?.model_fallback) initialLabel = "模型异常回退";
 
   return (
@@ -1027,6 +1030,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
                 <SelectItem value="all">全部来源</SelectItem>
                 <SelectItem value="model">模型判定</SelectItem>
                 <SelectItem value="rule">规则判定</SelectItem>
+                <SelectItem value="manual">人工判定</SelectItem>
                 <SelectItem value="unknown">来源未知</SelectItem>
               </SelectGroup>
             </SelectContent>

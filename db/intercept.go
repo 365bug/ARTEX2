@@ -227,9 +227,12 @@ func scanInterceptApprovalRow(rows interface{ Scan(...any) error }, r *Intercept
 }
 
 // Keep legacy rows without decision_source consistent with their displayed source.
-const approvalDecisionSource = `COALESCE(NULLIF(ip.decision_source,''), CASE
- WHEN ip.rule_id IS NOT NULL THEN 'rule'
- WHEN ip.reason LIKE '[模型]%' THEN 'model' ELSE 'unknown' END)`
+const approvalDecisionSource = `CASE
+ WHEN ip.audit->>'decision_reason' LIKE '人工允许%' OR ip.audit->>'decision_reason' LIKE '人工拒绝%' THEN 'manual'
+ ELSE COALESCE(NULLIF(ip.decision_source,''), CASE
+   WHEN ip.rule_id IS NOT NULL THEN 'rule'
+   WHEN ip.reason LIKE '[模型]%' THEN 'model' ELSE 'unknown' END)
+ END`
 
 const approvalRowColumns = `ip.id, ip.rule_id, ip.conversation_id, ip.task_id, ip.agent_name,
        ip.tool_name, ip.tool_input, ip.status, ip.reason, ip.decided_at, ip.created_at, ` + approvalDecisionSource + `,

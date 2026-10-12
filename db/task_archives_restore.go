@@ -675,10 +675,18 @@ func restoreInterceptRows(tx *sql.Tx, raw json.RawMessage) error {
 		// Archives predating approval snapshots lack this NOT NULL column.
 		if source, _ := row["decision_source"].(string); source == "" {
 			source = "unknown"
-			if row["rule_id"] != nil {
+			if audit, ok := row["audit"].(map[string]any); ok {
+				if reason, _ := audit["decision_reason"].(string); strings.HasPrefix(reason, "人工允许") || strings.HasPrefix(reason, "人工拒绝") {
+					source = "manual"
+				}
+			}
+			if source == "unknown" && row["rule_id"] != nil {
 				source = "rule"
-			} else if reason, _ := row["reason"].(string); strings.HasPrefix(reason, "[模型]") {
-				source = "model"
+			} else if source == "unknown" {
+				reason, _ := row["reason"].(string)
+				if strings.HasPrefix(reason, "[模型]") {
+					source = "model"
+				}
 			}
 			row["decision_source"] = source
 		}

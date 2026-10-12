@@ -30,6 +30,9 @@ func TestInterceptSearchFilterParams(t *testing.T) {
 	if err != nil || filter.CreatedFrom != "2026-10-01" || filter.CreatedTo != "2026-10-12" {
 		t.Fatalf("date filter=%+v err=%v", filter, err)
 	}
+	if filter, err := interceptFilterParams(url.Values{"decision_source": []string{"manual"}}); err != nil || filter.DecisionSource != "manual" {
+		t.Fatalf("manual decision source rejected: %+v %v", filter, err)
+	}
 	for _, values := range []url.Values{
 		{"from": []string{"2026-10-1"}},
 		{"to": []string{"not-a-date"}},
