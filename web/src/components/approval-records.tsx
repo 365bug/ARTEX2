@@ -11,6 +11,7 @@ import {
   ClipboardListIcon,
   CopyIcon,
   RefreshCwIcon,
+  SearchIcon,
   ShieldAlertIcon,
   XIcon,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -764,6 +766,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const [pageSize, setPageSize] = React.useState(20);
   const [total, setTotal] = React.useState(0);
   const [filter, setFilter] = React.useState<InterceptApprovalFilter>({});
+  const [searchText, setSearchText] = React.useState("");
+  const [fromDate, setFromDate] = React.useState("");
+  const [toDate, setToDate] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -773,7 +778,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const request = React.useRef(0);
   const decisionLock = React.useRef(false);
   const filterID = React.useId();
-  const filtered = Boolean(filter.status || filter.decision_source);
+  const filtered = Boolean(filter.status || filter.decision_source || filter.q || filter.from || filter.to);
 
   // A task can stay mounted while the user switches between task details.
   // Reset the cursor so the new scope always starts at its newest records.
@@ -843,12 +848,39 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
     // An in-flight response for the old filter must not repopulate the table.
     request.current++;
     setFilter(next);
+    setSearchText(next.q ?? "");
+    setFromDate(next.from ?? "");
+    setToDate(next.to ?? "");
     setPage(1);
     setRows([]);
     setTotal(0);
     setError("");
     setLoading(true);
   };
+
+  const submitSearch = () => {
+    const q = searchText.trim();
+    changeFilter({ ...filter, q: q || undefined });
+  };
+
+  const changeDate = (key: "from" | "to", value: string) => {
+    changeFilter({ ...filter, [key]: value || undefined });
+  };
+
+  React.useEffect(() => {
+    const q = searchText.trim();
+    if (q === (filter.q ?? "")) return;
+    const timer = setTimeout(() => {
+      request.current++;
+      setFilter((previous) => ({ ...previous, q: q || undefined }));
+      setPage(1);
+      setRows([]);
+      setTotal(0);
+      setError("");
+      setLoading(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchText, filter.q]);
 
   const decide: Decide = async (id, decision) => {
     if (decisionLock.current) return;
@@ -901,8 +933,53 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
           刷新
         </Button>
       </div>
-      <p className="text-muted-foreground text-sm">展开记录查看工具请求和审批裁决，以及当时的上下文与执行结果。</p>
+      <p className="text-muted-foreground text-sm">
+        展开记录查看工具请求和审批裁决，以及当时的上下文与执行结果。输入 #编号 可精确定位审批。
+      </p>
       <FieldGroup className="flex-row flex-wrap items-end gap-3" aria-label="审批记录筛选">
+        <Field className="w-full sm:min-w-80 sm:flex-1">
+          <FieldLabel htmlFor={`${filterID}-search`}>搜索审批内容</FieldLabel>
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id={`${filterID}-search`}
+                className="pl-8"
+                value={searchText}
+                maxLength={200}
+                placeholder="编号、标题、URL、命令或脚本内容"
+                onChange={(event) => setSearchText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    submitSearch();
+                  }
+                }}
+              />
+            </div>
+            <Button type="button" variant="outline" onClick={submitSearch}>
+              搜索
+            </Button>
+          </div>
+        </Field>
+        <Field className="w-full sm:w-40">
+          <FieldLabel htmlFor={`${filterID}-from`}>申请时间从</FieldLabel>
+          <Input
+            id={`${filterID}-from`}
+            type="date"
+            value={fromDate}
+            onChange={(event) => changeDate("from", event.target.value)}
+          />
+        </Field>
+        <Field className="w-full sm:w-40">
+          <FieldLabel htmlFor={`${filterID}-to`}>申请时间至</FieldLabel>
+          <Input
+            id={`${filterID}-to`}
+            type="date"
+            value={toDate}
+            onChange={(event) => changeDate("to", event.target.value)}
+          />
+        </Field>
         <Field className="w-full sm:w-40">
           <FieldLabel htmlFor={`${filterID}-status`}>审批状态</FieldLabel>
           <Select
@@ -980,6 +1057,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       <section className="rounded-xl border">
         <div className="border-b px-4 py-3 font-medium text-sm">
           {filtered ? "筛选结果" : "全部记录"}（{total}）
+          {filter.q ? (
+            <span className="ml-2 break-all font-normal text-muted-foreground text-xs">搜索：{filter.q}</span>
+          ) : null}
         </div>
         {loading ? (
           <div className="flex flex-col gap-3 p-4">

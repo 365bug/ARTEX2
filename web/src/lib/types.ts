@@ -1386,6 +1386,9 @@ export interface JudgeUsage {
 export interface InterceptApprovalFilter {
   status?: InterceptPending["status"];
   decision_source?: "rule" | "model" | "unknown";
+  q?: string;
+  from?: string;
+  to?: string;
 }
 
 // InterceptApprovalRow enriches InterceptPending with conversation/task and rule context.
