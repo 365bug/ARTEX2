@@ -1341,7 +1341,7 @@ export interface AssetInterceptRule {
 }
 
 export interface InterceptPending {
-  decision_source?: "rule" | "model" | "unknown" | "";
+  decision_source?: "rule" | "model" | "manual" | "unknown" | "";
   id: number;
   rule_id?: number;
   conversation_id?: number;
@@ -1365,6 +1365,7 @@ export interface JudgeConfig {
   fail_action: "allow" | "ask" | "deny"; // 模型出错/超时/不可解析时的回退
   ask_timeout_seconds: number; // 模型判 ask 转人工后的审批等待超时
   ask_timeout_action: "allow" | "deny"; // 审批超时后的默认动作
+  incomplete_script_action: "ask" | "model"; // 脚本快照不完整时：人工审查或继续模型审查
 }
 
 // JudgeUsage: 模型兜底审批(judge 通道)的累计 token 用量 + 近 N 天每日序列。
@@ -1385,7 +1386,7 @@ export interface JudgeUsage {
 
 export interface InterceptApprovalFilter {
   status?: InterceptPending["status"];
-  decision_source?: "rule" | "model" | "unknown";
+  decision_source?: "rule" | "model" | "manual" | "unknown";
   q?: string;
   from?: string;
   to?: string;

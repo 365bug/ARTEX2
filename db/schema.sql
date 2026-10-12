@@ -1120,6 +1120,10 @@ ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS audit JSONB;
 ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS decision_source TEXT NOT NULL DEFAULT '';
 UPDATE intercept_pending SET decision_source=CASE WHEN rule_id IS NOT NULL THEN 'rule'
  WHEN reason LIKE '[模型]%' THEN 'model' ELSE 'unknown' END WHERE decision_source='';
+-- 审批请求的初判来源可能是规则/模型，但最终由用户允许或拒绝；保留最终人工判定来源。
+UPDATE intercept_pending SET decision_source='manual'
+ WHERE decision_source <> 'manual'
+   AND (audit->>'decision_reason' LIKE '人工允许%' OR audit->>'decision_reason' LIKE '人工拒绝%');
 
 -- =====================================================================
 -- L. 漏洞发现持久化

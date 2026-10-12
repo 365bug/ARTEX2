@@ -356,9 +356,9 @@ func interceptFilterParams(q url.Values) (db.InterceptApprovalFilter, error) {
 		return filter, fmt.Errorf("status 必须是 pending、allowed、denied 或 timeout")
 	}
 	switch filter.DecisionSource {
-	case "", "model", "rule", "unknown":
+	case "", "model", "rule", "manual", "unknown":
 	default:
-		return filter, fmt.Errorf("decision_source 必须是 model、rule 或 unknown")
+		return filter, fmt.Errorf("decision_source 必须是 model、rule、manual 或 unknown")
 	}
 	return filter, nil
 }
@@ -464,6 +464,14 @@ func (s *Server) interceptSetJudgeConfig(w http.ResponseWriter, r *http.Request)
 	case "allow", "deny":
 	default:
 		writeErr(w, 400, "ask_timeout_action 必须是 allow 或 deny")
+		return
+	}
+	switch req.IncompleteScriptAction {
+	case "":
+		req.IncompleteScriptAction = "ask"
+	case "ask", "model":
+	default:
+		writeErr(w, 400, "incomplete_script_action 必须是 ask 或 model")
 		return
 	}
 	if err := s.m.interceptor.SetJudgeConfig(req); err != nil {

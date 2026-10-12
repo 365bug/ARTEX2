@@ -130,6 +130,78 @@ func TestReviewInputCapturesCompleteScript(t *testing.T) {
 	}
 }
 
+func TestReviewInputDoesNotTreatShellTestAsScript(t *testing.T) {
+	command := `echo "PWD=$(pwd)"; ls -la /app/data/sessions/conv-473 2>&1 | head -50; if [ -n "${TOKEN:-}" ]; then echo "TOKEN is set"; else echo "TOKEN not set"; fi; env | grep -iE 'token|proxy|traffic|target|10\\.211' | sed 's/=.*/=<redacted>/'`
+	args, _ := json.Marshal(map[string]string{"command": command})
+	in, err := BuildReviewInput(WithReviewWorkingDirectory(t.Context(), "/tmp"), "Bash", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.ScriptCaptureStatus != "not_applicable" || len(in.Scripts) != 0 {
+		t.Fatalf("plain shell command was misclassified as script: status=%q scripts=%+v", in.ScriptCaptureStatus, in.Scripts)
+	}
+}
+
+func TestReviewInputShellCommandCombinations(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "check.py"), []byte("print('ok')\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, command, status string
+	}{
+		{name: "plain", command: "pwd", status: "not_applicable"},
+		{name: "pipeline", command: "env | grep TOKEN | sed 's/=.*/redacted/'", status: "not_applicable"},
+		{name: "substitution", command: "echo $(pwd)", status: "not_applicable"},
+		{name: "conditional", command: `if [ -n "${TOKEN:-}" ]; then echo set; fi`, status: "not_applicable"},
+		{name: "shell_inline", command: `bash -c 'echo safe; printf ok'`, status: "not_applicable"},
+		{name: "python_inline", command: `python3 -c 'print(1)'`, status: "not_applicable"},
+		{name: "stdin_script", command: "python3 -", status: "incomplete"},
+		{name: "source_missing", command: ". ./missing.sh", status: "incomplete"},
+		{name: "wrapped_script", command: "timeout 5 env MODE=test bash ./missing.sh", status: "incomplete"},
+		{name: "dynamic_entry", command: `${RUNNER} ./check.py`, status: "incomplete"},
+		{name: "redirect", command: "echo safe > output.txt", status: "not_applicable"},
+		{name: "script", command: "python3 ./check.py", status: "complete"},
+		{name: "missing_script", command: "bash ./missing.sh", status: "incomplete"},
+		{name: "dynamic_script", command: `python3 "$SCRIPT_PATH"`, status: "incomplete"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tc.command})
+			in, err := BuildReviewInput(WithReviewWorkingDirectory(t.Context(), dir), "Bash", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if in.ScriptCaptureStatus != tc.status {
+				t.Fatalf("status=%q want %q scripts=%+v", in.ScriptCaptureStatus, tc.status, in.Scripts)
+			}
+		})
+	}
+}
+
+func TestIncompleteScriptPolicy(t *testing.T) {
+	incomplete := ReviewInput{ScriptCaptureStatus: "incomplete"}
+	for _, tc := range []struct {
+		name, policy, action, wantAction string
+	}{
+		{name: "default human review", policy: "ask", action: "allow", wantAction: "ask"},
+		{name: "model review", policy: "model", action: "allow", wantAction: "allow"},
+		{name: "model deny remains deny", policy: "model", action: "deny", wantAction: "deny"},
+		{name: "complete allow remains allow", policy: "ask", action: "allow", wantAction: "allow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := incomplete
+			if tc.name == "complete allow remains allow" {
+				input.ScriptCaptureStatus = "complete"
+			}
+			got := applyIncompleteScriptPolicy(input, Decision{Action: tc.action}, tc.policy)
+			if got.Action != tc.wantAction {
+				t.Fatalf("action=%q want %q", got.Action, tc.wantAction)
+			}
+		})
+	}
+}
+
 func TestReviewInputResolvesCdAndSourceScript(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "login.sh")

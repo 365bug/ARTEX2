@@ -203,6 +203,7 @@ const defaultJudge = (): JudgeConfig => ({
   fail_action: "allow",
   ask_timeout_seconds: 300,
   ask_timeout_action: "deny",
+  incomplete_script_action: "ask",
 });
 
 function JudgeCard() {
@@ -393,6 +394,18 @@ function JudgeCard() {
                       <SelectItem value="allow">放行</SelectItem>
                       <SelectItem value="ask">转人工审批</SelectItem>
                       <SelectItem value="deny">拦截</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="脚本快照不完整时">
+                  <Select
+                    value={cfg.incomplete_script_action}
+                    onValueChange={(v) => patch({ incomplete_script_action: v as JudgeConfig["incomplete_script_action"] })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ask">转人工审查（默认）</SelectItem>
+                      <SelectItem value="model">继续交给模型审查</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>

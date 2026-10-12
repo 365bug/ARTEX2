@@ -116,13 +116,16 @@ function StatusBadge({ status }: { status: string }) {
 
 function MatchCell({ row, showReason = true }: { row: InterceptApprovalRow; showReason?: boolean }) {
   const reason = row.reason?.replace(/^\[模型\]\s*/, "");
+  const decisionSource = source(row);
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      {source(row) === "model" ? (
+      {decisionSource === "model" ? (
         <Badge variant="outline">
           <BotIcon />
           模型判定
         </Badge>
+      ) : decisionSource === "manual" ? (
+        <Badge variant="outline">人工判定</Badge>
       ) : (
         <span className="truncate">{row.rule_name || "规则未记录或已删除"}</span>
       )}
@@ -206,7 +209,7 @@ function ScriptSnapshotSummary({ input }: { input: InterceptReviewInput }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium text-sm">审查脚本快照</h3>
         <Badge variant={input.script_capture_status === "incomplete" ? "destructive" : "secondary"}>
-          {input.script_capture_status === "incomplete" ? "读取不完整 · 需人工确认" : "已附加"}
+          {input.script_capture_status === "incomplete" ? "读取不完整" : "已附加"}
         </Badge>
       </div>
       {files.map((file) => (
@@ -308,7 +311,7 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
           ))}
           {input.script_capture_status === "incomplete" ? (
             <Alert variant="destructive">
-              <AlertDescription>无法完整读取当前执行脚本，平台要求人工确认。</AlertDescription>
+              <AlertDescription>无法完整读取当前执行脚本；默认转人工审查，也可以在模型设置中继续交给审查模型。</AlertDescription>
             </Alert>
           ) : null}
         </section>
@@ -424,7 +427,7 @@ export function ApprovalDetail({
   if (row.status === "pending") execution = "尚未执行";
   if (audit && audit.correlation !== "exact" && audit.effective_action === "allow") execution = "未关联执行结果";
   const command = typeof row.tool_input?.command === "string" ? row.tool_input.command : undefined;
-  let initialLabel = source(row) === "model" ? "模型初判" : "规则初判";
+  let initialLabel = source(row) === "model" ? "模型初判" : source(row) === "manual" ? "人工判定" : "规则初判";
   if (audit?.model_fallback) initialLabel = "模型异常回退";
 
   return (
@@ -439,7 +442,7 @@ export function ApprovalDetail({
         "为什么这次被放行或拦截？",
         "脚本中有哪些未确定行为？",
       ]}
-      className="min-h-[460px]"
+      className={cn(side.open ? "min-h-[460px]" : "min-h-0")}
       mainClassName="overflow-visible"
     >
       <div className="flex min-w-0 flex-col gap-4 p-3 sm:p-5">
@@ -1027,6 +1030,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
                 <SelectItem value="all">全部来源</SelectItem>
                 <SelectItem value="model">模型判定</SelectItem>
                 <SelectItem value="rule">规则判定</SelectItem>
+                <SelectItem value="manual">人工判定</SelectItem>
                 <SelectItem value="unknown">来源未知</SelectItem>
               </SelectGroup>
             </SelectContent>
