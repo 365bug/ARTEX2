@@ -1222,7 +1222,8 @@ const TaskRow = React.memo(function TaskRow({
       </TableCell>
       <TableCell className="text-center text-xs tabular-nums">
         {(() => {
-          const f = task.distinct_findings ?? task.findings;
+          // Keep report severity counts visible while a merged folder awaits its own assessment.
+          const f = task.findings ?? task.distinct_findings;
           const total = f ? f.critical + f.high + f.medium + f.low : 0;
           if (!f || (total === 0 && !task.distinct_findings?.total))
             return <span className="text-muted-foreground">0</span>;
@@ -1230,7 +1231,7 @@ const TaskRow = React.memo(function TaskRow({
           return (
             <span
               className="font-medium whitespace-nowrap"
-              title={`独立漏洞：严重 / 高 / 中 / 低；上报 ${task.distinct_findings?.reports ?? total} 条；待评估 ${task.distinct_findings?.unassessed ?? 0} 个`}
+              title={`${task.findings ? "原始上报" : "独立漏洞"}：严重 / 高 / 中 / 低；上报 ${task.distinct_findings?.reports ?? total} 条；待评估 ${task.distinct_findings?.unassessed ?? 0} 个`}
             >
               {seg(f.critical, "text-rose-600 dark:text-rose-400")}
               <span className="text-muted-foreground">/</span>
