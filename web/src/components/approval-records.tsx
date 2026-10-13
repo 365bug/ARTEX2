@@ -288,13 +288,14 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
           <div>
             <h3 className="font-medium text-sm">脚本快照</h3>
             <p className="text-muted-foreground text-xs">
-              这是审查前由平台从当前调用引用的路径读取的内容；不会在审查过程中执行脚本。
+              这是审查前从当前命令或引用文件提取的脚本内容；不会在审查过程中执行脚本。
             </p>
           </div>
           {input.script_files.map((file) => (
-            <div key={file.path} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
+            <div key={`${file.path}:${file.source ?? ""}:${file.sha256 ?? file.read_error ?? ""}`} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                 <span className="break-all font-mono">{file.path}</span>
+                {file.source ? <span className="text-muted-foreground">{file.source === "command" ? "命令内生成" : "引用文件"}</span> : null}
                 {file.sha256 ? <span className="text-muted-foreground">SHA-256 {file.sha256}</span> : null}
                 {file.bytes != null ? <span className="text-muted-foreground">{file.bytes} 字节</span> : null}
               </div>
@@ -311,7 +312,7 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
           ))}
           {input.script_capture_status === "incomplete" ? (
             <Alert variant="destructive">
-              <AlertDescription>无法完整读取当前执行脚本；默认转人工审查，也可以在模型设置中继续交给审查模型。</AlertDescription>
+              <AlertDescription>无法完整读取当前执行脚本；默认继续交给模型审查，也可以在模型设置中选择转人工审查。</AlertDescription>
             </Alert>
           ) : null}
         </section>

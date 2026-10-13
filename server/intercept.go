@@ -468,7 +468,7 @@ func (s *Server) interceptSetJudgeConfig(w http.ResponseWriter, r *http.Request)
 	}
 	switch req.IncompleteScriptAction {
 	case "":
-		req.IncompleteScriptAction = "ask"
+		req.IncompleteScriptAction = intercept.DefaultIncompleteScriptAction
 	case "ask", "model":
 	default:
 		writeErr(w, 400, "incomplete_script_action 必须是 ask 或 model")

@@ -25,6 +25,7 @@ type ReviewBackground struct {
 // this snapshot is the only source-code evidence it can inspect.
 type ReviewScript struct {
 	Path      string `json:"path"`
+	Source    string `json:"source,omitempty"` // file | command; command files are not created yet
 	SHA256    string `json:"sha256,omitempty"`
 	Bytes     int64  `json:"bytes,omitempty"`
 	Content   string `json:"content,omitempty"`
