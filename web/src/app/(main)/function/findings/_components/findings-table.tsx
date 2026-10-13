@@ -40,7 +40,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { statusMeta } from "@/lib/status";
-import type { ActiveFindingRetest, Finding, FindingCaseListRow, FindingStatus, Severity } from "@/lib/types";
+import type {
+  ActiveFindingRetest,
+  Finding,
+  FindingAsset,
+  FindingCaseListRow,
+  FindingStatus,
+  Severity,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -275,24 +282,7 @@ export function FindingsTable({
                   </div>
                 </TableCell>
                 <TableCell>
-                  {f.assets && f.assets.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {f.assets.slice(0, 3).map((a) => (
-                        <code
-                          key={a.id}
-                          className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
-                          title={`${a.type} · ${a.label}`}
-                        >
-                          {a.label}
-                        </code>
-                      ))}
-                      {f.assets.length > 3 && (
-                        <span className="text-xs text-muted-foreground">+{f.assets.length - 3}</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
+                  <FindingAssetLabels assets={f.assets} />
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   {f.finding_id ? (
@@ -511,6 +501,34 @@ export function FindingsTable({
   );
 }
 
+// Ordinary reports and merged folders share one asset presentation, including
+// truncation and overflow counts, so labels align in every table view.
+function FindingAssetLabels({
+  assets = [],
+  totalCount = assets.length,
+}: {
+  assets?: FindingAsset[];
+  totalCount?: number;
+}) {
+  if (assets.length === 0) return <span className="text-muted-foreground">—</span>;
+  const visibleAssets = assets.slice(0, 3);
+  const remaining = Math.max(totalCount, assets.length) - visibleAssets.length;
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {visibleAssets.map((asset) => (
+        <code
+          key={asset.id}
+          className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
+          title={`${asset.type} · ${asset.label}`}
+        >
+          {asset.label}
+        </code>
+      ))}
+      {remaining > 0 ? <span className="text-xs text-muted-foreground">+{remaining}</span> : null}
+    </div>
+  );
+}
+
 // Folder summaries occupy the same columns as the current view's ordinary rows.
 // Expanded members reuse those rows without a second heading or column header.
 function FindingFolderTableRows({
@@ -568,18 +586,7 @@ function FindingFolderTableRows({
           </div>
         </TableCell>
         <TableCell>
-          {assets.length ? (
-            <div className="flex flex-col gap-0.5">
-              {assets.slice(0, 3).map((a) => (
-                <code key={a.id} className="max-w-full truncate text-xs" title={`${a.type} · ${a.label}`}>
-                  {a.label}
-                </code>
-              ))}
-              {assetCount > 3 ? <span className="text-muted-foreground text-xs">+{assetCount - 3}</span> : null}
-            </div>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
+          <FindingAssetLabels assets={assets} totalCount={assetCount} />
         </TableCell>
         <TableCell>
           <span className="text-muted-foreground" title="请查看成员各自的处置状态">

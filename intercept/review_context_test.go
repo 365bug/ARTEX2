@@ -125,7 +125,7 @@ func TestReviewInputCapturesCompleteScript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.Version != 5 || in.ScriptCaptureStatus != "complete" || len(in.Scripts) != 1 || in.Scripts[0].Path != path || in.Scripts[0].Content != content || in.Scripts[0].SHA256 == "" || in.Scripts[0].Truncated {
+	if in.Version != 5 || in.ScriptCaptureStatus != "complete" || len(in.Scripts) != 1 || in.Scripts[0].Path != path || in.Scripts[0].Source != "file" || in.Scripts[0].Content != content || in.Scripts[0].SHA256 == "" || in.Scripts[0].Truncated {
 		t.Fatalf("script snapshot missing: %+v", in)
 	}
 }
@@ -184,9 +184,10 @@ func TestIncompleteScriptPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name, policy, action, wantAction string
 	}{
-		{name: "default human review", policy: "ask", action: "allow", wantAction: "ask"},
+		{name: "explicit human review", policy: "ask", action: "allow", wantAction: "ask"},
 		{name: "model review", policy: "model", action: "allow", wantAction: "allow"},
 		{name: "model deny remains deny", policy: "model", action: "deny", wantAction: "deny"},
+		{name: "model ask remains ask", policy: "model", action: "ask", wantAction: "ask"},
 		{name: "complete allow remains allow", policy: "ask", action: "allow", wantAction: "allow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

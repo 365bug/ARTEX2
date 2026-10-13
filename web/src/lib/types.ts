@@ -1487,6 +1487,7 @@ export interface InterceptReviewInput {
   script_capture_status?: "not_applicable" | "complete" | "incomplete";
   script_files?: {
     path: string;
+    source?: "file" | "command";
     sha256?: string;
     bytes?: number;
     content?: string;

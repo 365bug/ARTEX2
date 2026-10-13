@@ -317,6 +317,8 @@ const (
 	defaultJudgeFailAction       = "allow"
 	defaultJudgeAskTimeoutSecs   = 300
 	defaultJudgeAskTimeoutAction = "deny"
+	// DefaultIncompleteScriptAction keeps incomplete snapshots with the judge.
+	DefaultIncompleteScriptAction = "model"
 )
 
 // JudgeConfig is the resolved LLM-fallback-judge configuration. Prompt is always
@@ -343,7 +345,7 @@ func (i *Interceptor) judgeConfig() JudgeConfig {
 		FailAction:             i.getSettingChoice(settingJudgeFailAction, defaultJudgeFailAction, "allow", "ask", "deny"),
 		AskTimeoutSeconds:      i.getSettingInt(settingJudgeAskTimeoutSecs, defaultJudgeAskTimeoutSecs),
 		AskTimeoutAction:       i.getSettingChoice(settingJudgeAskTimeoutAction, defaultJudgeAskTimeoutAction, "allow", "deny"),
-		IncompleteScriptAction: i.getSettingChoice(settingJudgeIncompleteScript, "ask", "ask", "model"),
+		IncompleteScriptAction: i.getSettingChoice(settingJudgeIncompleteScript, DefaultIncompleteScriptAction, "ask", "model"),
 	}
 	// Prompt: stored value if non-empty, else the built-in template.
 	if v, ok, _ := i.db.GetSetting(settingJudgePrompt); ok && strings.TrimSpace(v) != "" {
@@ -464,9 +466,9 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 	if err != nil {
 		out = Decision{ProfileID: out.ProfileID, ModelFallback: true, Action: cfg.FailAction, Message: "模型审批失败,按失败策略处理: " + err.Error()}
 	}
-	// By default an incomplete script snapshot requires human review. Operators
-	// may explicitly choose model review; in that mode the model receives the
-	// read errors/partial snapshot and its verdict is honored.
+	// By default the model receives snapshot read errors and its verdict is
+	// honored. Operators may explicitly require human review when an incomplete
+	// snapshot would otherwise be allowed.
 	out = applyIncompleteScriptPolicy(input, out, cfg.IncompleteScriptAction)
 	switch out.Action {
 	case "allow", "ask", "deny":

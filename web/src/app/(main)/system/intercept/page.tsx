@@ -203,7 +203,7 @@ const defaultJudge = (): JudgeConfig => ({
   fail_action: "allow",
   ask_timeout_seconds: 300,
   ask_timeout_action: "deny",
-  incomplete_script_action: "ask",
+  incomplete_script_action: "model",
 });
 
 function JudgeCard() {
@@ -404,8 +404,8 @@ function JudgeCard() {
                   >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ask">转人工审查（默认）</SelectItem>
-                      <SelectItem value="model">继续交给模型审查</SelectItem>
+                      <SelectItem value="ask">转人工审查</SelectItem>
+                      <SelectItem value="model">继续交给模型审查（默认）</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
