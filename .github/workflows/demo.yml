@@ -172,7 +172,7 @@ jobs:
           # 空项目首次部署也明确绑定固定域名，后续版本沿用同一个网址。
           domain="${DEMO_URL#https://}"
           domain="${domain%/}"
-          vercel alias set "$url" "$domain" --token="$VERCEL_TOKEN"
+          vercel alias set "$url" "$domain" --team="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "### Demo 已部署" >> "$GITHUB_STEP_SUMMARY"
           echo "- 正式版本：${{ steps.release.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
