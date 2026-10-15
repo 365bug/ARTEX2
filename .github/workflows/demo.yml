@@ -80,6 +80,10 @@ jobs:
               exit 1
             fi
           done
+          if [[ ! "$DEMO_URL" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]+/?$ ]]; then
+            echo "::error::DEMO_URL 必须是 HTTPS 生产域名，不能含路径、查询参数或凭据"
+            exit 1
+          fi
 
       - uses: actions/checkout@v4
         if: steps.release.outputs.current == 'true'
@@ -133,6 +137,26 @@ jobs:
             "https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID&upsert=true" \
             --output /tmp/demo-env.json
           jq -e '(.failed // []) | length == 0' /tmp/demo-env.json
+          # 项目令牌无法调用 CLI alias 依赖的用户信息接口，直接配置项目域名。
+          # 将域名关联到项目后，--prod 会随每次发布自动更新该域名。
+          domain="${DEMO_URL#https://}"
+          domain="${domain%/}"
+          status=$(curl --silent --show-error --write-out '%{http_code}' \
+            --header "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/domains/$domain?teamId=$VERCEL_ORG_ID" \
+            --output /tmp/demo-domain.json)
+          if [ "$status" = "404" ]; then
+            jq -n --arg name "$domain" '{name:$name}' > /tmp/demo-domain-input.json
+            curl --fail-with-body --silent --show-error --request POST \
+              --header "Authorization: Bearer $VERCEL_TOKEN" --header 'Content-Type: application/json' \
+              --data-binary @/tmp/demo-domain-input.json \
+              "https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/domains?teamId=$VERCEL_ORG_ID" \
+              --output /tmp/demo-domain.json
+          elif [ "$status" != "200" ]; then
+            jq '.error' /tmp/demo-domain.json
+            exit 1
+          fi
+          jq -e --arg domain "$domain" '.name == $domain and .verified == true' /tmp/demo-domain.json
 
       - name: Pull production project settings
         if: steps.release.outputs.current == 'true'
@@ -169,13 +193,10 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           url=$(vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")
-          # 空项目首次部署也明确绑定固定域名，后续版本沿用同一个网址。
-          domain="${DEMO_URL#https://}"
-          domain="${domain%/}"
-          vercel alias set "$url" "$domain" --team="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "### Demo 已部署" >> "$GITHUB_STEP_SUMMARY"
           echo "- 正式版本：${{ steps.release.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 固定网址：$DEMO_URL" >> "$GITHUB_STEP_SUMMARY"
           echo "- 部署地址：$url" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify production version metadata
