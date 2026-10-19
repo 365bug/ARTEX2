@@ -154,14 +154,51 @@ func evaluateRuntimeScheduleWindow(item *db.TaskSchedule, now, startedAt time.Ti
 	return w
 }
 
+// taskManualScheduleEnd allows only the selected task to run until the next
+// enabled calendar's end. The normal union of windows still governs overlapping
+// plans after that boundary. Open-ended or disabled plans impose no deadline.
+func (s *Server) taskManualScheduleEnd(taskID string, now time.Time) (*time.Time, error) {
+	id, err := strconv.ParseInt(taskID, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.m.pg.ListTaskSchedules()
+	if err != nil {
+		return nil, err
+	}
+	var until *time.Time
+	for _, item := range items {
+		for _, boundID := range item.TaskIDs {
+			if boundID != id {
+				continue
+			}
+			if until == nil {
+				unbounded := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+				until = &unbounded
+			}
+			if item.Enabled && item.Status != "completed" {
+				w := evaluateScheduleWindow(item, now)
+				if w.nextEnd != nil && w.nextEnd.After(now) && w.nextEnd.Before(*until) {
+					until = w.nextEnd
+				}
+			}
+			break
+		}
+	}
+	return until, nil
+}
+
 func (sc *Scheduler) fireTaskSchedules() {
+	sc.fireTaskSchedulesAt(time.Now())
+}
+
+func (sc *Scheduler) fireTaskSchedulesAt(now time.Time) {
 	sc.s.scheduleMu.Lock()
 	defer sc.s.scheduleMu.Unlock()
 	items, err := sc.pg.ListTaskSchedules()
 	if err != nil {
 		return
 	}
-	now := time.Now()
 	open := map[int64]bool{}
 	windows := map[int64]scheduleWindow{}
 	for _, item := range items {
@@ -172,6 +209,26 @@ func (sc *Scheduler) fireTaskSchedules() {
 				open[id] = true
 			}
 		}
+	}
+	// Persisted task-level manual starts survive ticks, FIFO promotion and
+	// restarts. Their deadline is the next calendar end, even if no scheduler
+	// tick ran inside that window.
+	rows, err := sc.pg.Query(`SELECT id FROM tasks WHERE schedule_manual_until > $1 AND deleted_at IS NULL`, now)
+	if err != nil {
+		return
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return
+		}
+		open[id] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return
 	}
 	// Evaluate the union first, then control each task at most once per tick.
 	seen := map[int64]bool{}
