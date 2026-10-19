@@ -713,6 +713,7 @@ export default function SchedulesPage() {
                       onCheckedChange={(checked) => toggleAllVisible(checked === true)}
                     />
                   </TableHead>
+                  <TableHead className="font-mono">ID</TableHead>
                   <TableHead className="min-w-44">计划名称</TableHead>
                   <TableHead>备注</TableHead>
                   <TableHead className="w-28">时间线</TableHead>
@@ -737,9 +738,9 @@ export default function SchedulesPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        <div className="font-medium">{item.name}</div>
-                        <div className="text-muted-foreground text-xs">计划 #{item.id}</div>
+                        <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">{item.id}</code>
                       </TableCell>
+                      <TableCell className="font-medium">{item.name}</TableCell>
                       <TableCell>
                         <RemarkEditor
                           value={item.remark}
@@ -858,7 +859,7 @@ export default function SchedulesPage() {
                     </TableRow>
                     {expandedId === item.id ? (
                       <TableRow>
-                        <TableCell colSpan={11} className="bg-muted/10 p-3">
+                        <TableCell colSpan={12} className="bg-muted/10 p-3">
                           <ScheduleTimeline schedule={timelineById[item.id]} loading={timelineLoadingId === item.id} />
                         </TableCell>
                       </TableRow>
