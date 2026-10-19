@@ -405,9 +405,22 @@ func (d *DB) ListScheduleHistory(id int64) ([]ScheduleHistory, error) {
 	return items, rows.Err()
 }
 
+// TaskSchedulePatch changes list metadata without resetting execution windows.
+type TaskSchedulePatch struct {
+	Name   *string
+	Remark *string
+}
+
 // UpdateTaskScheduleRemark leaves calendar state and task bindings untouched.
 func (d *DB) UpdateTaskScheduleRemark(id int64, remark string) (*TaskSchedule, error) {
-	item, err := scanSchedule(d.QueryRow(`UPDATE task_schedules SET remark=$2 WHERE id=$1 RETURNING `+scheduleCols, id, remark))
+	return d.UpdateTaskScheduleMetadata(id, TaskSchedulePatch{Remark: &remark})
+}
+
+func (d *DB) UpdateTaskScheduleMetadata(id int64, patch TaskSchedulePatch) (*TaskSchedule, error) {
+	item, err := scanSchedule(d.QueryRow(`UPDATE task_schedules SET
+      name=CASE WHEN $2::boolean THEN $3 ELSE name END,
+      remark=CASE WHEN $4::boolean THEN $5 ELSE remark END
+      WHERE id=$1 RETURNING `+scheduleCols, id, patch.Name != nil, patch.Name, patch.Remark != nil, patch.Remark))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

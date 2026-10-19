@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 
 import { DateSelect } from "@/components/date-select";
-import { RemarkEditor } from "@/components/remark-editor";
+import { RemarkEditor, ScheduleNameEditor } from "@/components/remark-editor";
 import { TimeSelect } from "@/components/time-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -703,7 +703,7 @@ export default function SchedulesPage() {
           </Card>
         ) : (
           <div className="overflow-x-auto rounded-lg border bg-card">
-            <Table>
+            <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
               <TableHeader className="bg-muted/40">
                 <TableRow>
                   <TableHead className="w-12">
@@ -729,7 +729,7 @@ export default function SchedulesPage() {
               <TableBody>
                 {visibleItems.map((item) => (
                   <React.Fragment key={item.id}>
-                    <TableRow>
+                    <TableRow className="group">
                       <TableCell className="w-12">
                         <Checkbox
                           aria-label={`选择计划 ${item.name}`}
@@ -740,7 +740,16 @@ export default function SchedulesPage() {
                       <TableCell>
                         <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">{item.id}</code>
                       </TableCell>
-                      <TableCell className="font-medium">{item.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <ScheduleNameEditor
+                          value={item.name}
+                          label={`计划 #${item.id}`}
+                          onSave={async (name) => {
+                            const updated = await api.renameSchedule(item.id, name);
+                            setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, name: updated.name } : entry));
+                          }}
+                        />
+                      </TableCell>
                       <TableCell>
                         <RemarkEditor
                           value={item.remark}

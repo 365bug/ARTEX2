@@ -326,6 +326,7 @@ export const api = {
       schedule: input.schedule ? schedulePayload(input.schedule) : undefined,
     }),
   schedules: () => get<{ schedules: TaskSchedule[] }>("/schedules").then((r) => arr(r.schedules)),
+  renameSchedule: (id: number, name: string) => patch<TaskSchedule>(`/schedules/${id}/metadata`, { name }),
   updateScheduleRemark: (id: number, remark: string) => patch<TaskSchedule>(`/schedules/${id}/remark`, { remark }),
   schedule: (id: number) => get<TaskSchedule>(`/schedules/${id}`),
   createSchedule: (input: ScheduleInput) => post<TaskSchedule>("/schedules", schedulePayload(input)),

@@ -157,6 +157,30 @@ func TestRemarksRoundTripPreservesExecutionState(t *testing.T) {
 	if _, err := m.pg.UpdateTaskScheduleRemark(schedule.ID, note); err != nil {
 		t.Fatal(err)
 	}
+	metadataPath := fmt.Sprintf("/api/schedules/%d/metadata", schedule.ID)
+	rec = request(metadataPath, `{"name":"  行内改名  "}`, true)
+	if rec.Code != 200 {
+		t.Fatalf("schedule rename: %d %s", rec.Code, rec.Body.String())
+	}
+	renamed, err := m.pg.GetTaskSchedule(schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Name != "行内改名" || renamed.Remark != note || renamed.Status != original.Status || renamed.Enabled != original.Enabled || renamed.LastWindowKey != original.LastWindowKey || renamed.LastError != original.LastError || !renamed.LastTransitionAt.Equal(*original.LastTransitionAt) || len(renamed.TaskIDs) != 1 || renamed.TaskIDs[0] != taskID {
+		t.Fatalf("rename changed calendar state or metadata: %+v", renamed)
+	}
+	for _, body := range []string{`{}`, `{"name":null}`, `{"name":" "}`, `{"name":123}`, `{"name":"` + strings.Repeat("文", maxTaskNameRunes+1) + `"}`, `{"name":"must not apply","remark":"` + strings.Repeat("文", maxRemarkRunes+1) + `"}`} {
+		if rec := request(metadataPath, body, true); rec.Code != 400 {
+			t.Fatalf("invalid rename: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	unchanged, err := m.pg.GetTaskSchedule(schedule.ID)
+	if err != nil || unchanged.Name != "行内改名" || unchanged.Remark != note {
+		t.Fatalf("invalid patch partially changed metadata: %+v %v", unchanged, err)
+	}
+	if rec := request(metadataPath, `{"name":"denied"}`, false); rec.Code != 401 {
+		t.Fatalf("rename auth: %d", rec.Code)
+	}
 	scheduleInput.Name = "新计划名称"
 	updated, err := m.pg.UpdateTaskSchedule(schedule.ID, scheduleInput)
 	if err != nil || updated.Remark != note {
