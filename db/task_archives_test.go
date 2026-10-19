@@ -136,6 +136,10 @@ func TestTaskArchiveDatabaseRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	remark := "归档后保留的备注 📝"
+	if _, err := d.UpdateTask(task.ID, TaskPatch{Remark: &remark}); err != nil {
+		t.Fatal(err)
+	}
 	var companyID, llmProfileID int64
 	if err := d.QueryRow(`INSERT INTO companies(name,nkey) VALUES($1,$2) RETURNING id`,
 		fmt.Sprintf("archive-company-%d", task.ID), fmt.Sprintf("archive-company-%d", task.ID)).Scan(&companyID); err != nil {
@@ -282,7 +286,7 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if err != nil || live == nil {
 		t.Fatalf("restored task = %+v, %v", live, err)
 	}
-	if live.Name != "cold task" || !live.Paused {
+	if live.Name != "cold task" || live.Remark != remark || !live.Paused {
 		t.Fatalf("restored task metadata mismatch: %+v", live)
 	}
 	if err := d.QueryRow(`SELECT count(*) FROM exploration_nodes WHERE exploration_id=$1`, task.ExplorationID).Scan(&nodes); err != nil {

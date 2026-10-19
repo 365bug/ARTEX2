@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 
 import { DateSelect } from "@/components/date-select";
+import { RemarkEditor } from "@/components/remark-editor";
 import { TimeSelect } from "@/components/time-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -713,6 +714,7 @@ export default function SchedulesPage() {
                     />
                   </TableHead>
                   <TableHead className="min-w-44">计划名称</TableHead>
+                  <TableHead>备注</TableHead>
                   <TableHead className="w-28">时间线</TableHead>
                   <TableHead className="min-w-48">运行周期</TableHead>
                   <TableHead className="min-w-40">开始时间</TableHead>
@@ -737,6 +739,18 @@ export default function SchedulesPage() {
                       <TableCell>
                         <div className="font-medium">{item.name}</div>
                         <div className="text-muted-foreground text-xs">计划 #{item.id}</div>
+                      </TableCell>
+                      <TableCell>
+                        <RemarkEditor
+                          value={item.remark}
+                          label={`计划 #${item.id} ${item.name}`}
+                          onSave={async (remark) => {
+                            const updated = await api.updateScheduleRemark(item.id, remark);
+                            setItems((current) =>
+                              current.map((entry) => entry.id === item.id ? { ...entry, remark: updated.remark } : entry),
+                            );
+                          }}
+                        />
                       </TableCell>
                       <TableCell>
                         <Button size="sm" variant="outline" onClick={() => void toggleTimeline(item.id)}>
@@ -844,7 +858,7 @@ export default function SchedulesPage() {
                     </TableRow>
                     {expandedId === item.id ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="bg-muted/10 p-3">
+                        <TableCell colSpan={11} className="bg-muted/10 p-3">
                           <ScheduleTimeline schedule={timelineById[item.id]} loading={timelineLoadingId === item.id} />
                         </TableCell>
                       </TableRow>
