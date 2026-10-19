@@ -326,6 +326,8 @@ export const api = {
       schedule: input.schedule ? schedulePayload(input.schedule) : undefined,
     }),
   schedules: () => get<{ schedules: TaskSchedule[] }>("/schedules").then((r) => arr(r.schedules)),
+  renameSchedule: (id: number, name: string) => patch<TaskSchedule>(`/schedules/${id}/metadata`, { name }),
+  updateScheduleRemark: (id: number, remark: string) => patch<TaskSchedule>(`/schedules/${id}/remark`, { remark }),
   schedule: (id: number) => get<TaskSchedule>(`/schedules/${id}`),
   createSchedule: (input: ScheduleInput) => post<TaskSchedule>("/schedules", schedulePayload(input)),
   updateSchedule: (id: number, input: ScheduleInput) => patch<TaskSchedule>(`/schedules/${id}`, schedulePayload(input)),
@@ -335,7 +337,7 @@ export const api = {
   runScheduleNow: (id: number) =>
     post<{ ok: boolean; started: number; errors?: string[] }>(`/schedules/${id}/run-now`, {}),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
-  updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
+  updateTask: (id: string, input: { name?: string; pinned?: boolean; remark?: string }) => patch<Task>(`/tasks/${id}`, input),
   renameTask: (id: string, name: string) => patch<Task>(`/tasks/${id}`, { name }),
   pinTask: (id: string, pinned: boolean) => patch<Task>(`/tasks/${id}`, { pinned }),
   createTaskCategory: (name: string) => post<TaskCategory>("/task-categories", { name }),

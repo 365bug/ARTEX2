@@ -717,6 +717,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/schedules", s.createSchedule)
 	mux.HandleFunc("GET /api/schedules/{id}", s.getSchedule)
 	mux.HandleFunc("PATCH /api/schedules/{id}", s.updateSchedule)
+	mux.HandleFunc("PATCH /api/schedules/{id}/remark", s.updateScheduleMetadata)
+	mux.HandleFunc("PATCH /api/schedules/{id}/metadata", s.updateScheduleMetadata)
 	mux.HandleFunc("DELETE /api/schedules/{id}", s.deleteSchedule)
 	mux.HandleFunc("POST /api/schedules/{id}/pause", s.pauseSchedule)
 	mux.HandleFunc("POST /api/schedules/{id}/resume", s.resumeSchedule)

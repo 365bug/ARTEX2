@@ -29,6 +29,7 @@ import (
 type Task struct {
 	ID           string `json:"id"`
 	ExpID        int64  `json:"exploration_id"`
+	Remark       string `json:"remark"`
 	Name         string `json:"name"` // 可选任务名称;空=未命名
 	CategoryID   *int64 `json:"category_id,omitempty"`
 	CategoryName string `json:"category_name,omitempty"`
@@ -79,6 +80,7 @@ type Task struct {
 // directly after the task has been published by Manager.
 type taskLifecycleState struct {
 	Name          string
+	Remark        string
 	PinnedAt      int64
 	Status        string
 	Paused        bool
@@ -106,6 +108,7 @@ func (t *Task) lifecycleSnapshot() taskLifecycleState {
 func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 	return taskLifecycleState{
 		Name:          t.Name,
+		Remark:        t.Remark,
 		PinnedAt:      t.PinnedAt,
 		Status:        t.Status,
 		Paused:        t.Paused,
@@ -130,6 +133,7 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 	state := t.lifecycleSnapshotLocked()
 	update(&state)
 	t.Name = state.Name
+	t.Remark = state.Remark
 	t.PinnedAt = state.PinnedAt
 	t.Status = state.Status
 	t.Paused = state.Paused
@@ -832,6 +836,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 	return &Task{
 		ID: strconv.FormatInt(pt.ID, 10), ExpID: pt.ExplorationID,
 		Name:       pt.Name,
+		Remark:     pt.Remark,
 		CategoryID: cloneInt64Ptr(pt.CategoryID), CategoryName: pt.CategoryName,
 		PinnedAt:    unixOrZero(pt.PinnedAt),
 		Description: pt.Description, Goal: pt.Goal, CreatedAt: pt.CreatedAt.Unix(), Paused: pt.Paused, Queued: pt.Queued,
@@ -871,6 +876,7 @@ func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task
 	}
 	task.updateLifecycle(func(state *taskLifecycleState) {
 		state.Name = updated.Name
+		state.Remark = updated.Remark
 		state.PinnedAt = unixOrZero(updated.PinnedAt)
 	})
 	return task, nil

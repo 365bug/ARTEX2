@@ -553,6 +553,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queue_mode TEXT NOT NULL DEFAULT '';
 -- 可选的任务名称;补旧库。空串=未命名,前端展示时回退到描述。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS remark TEXT NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category_id BIGINT REFERENCES task_categories(id) ON DELETE SET NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS active_llm_profile_id BIGINT REFERENCES llm_profiles(id) ON DELETE SET NULL;
@@ -1057,6 +1058,7 @@ CREATE TABLE IF NOT EXISTS task_schedules (
 );
 CREATE INDEX IF NOT EXISTS idx_task_schedules_enabled ON task_schedules(enabled, id);
 ALTER TABLE task_schedules ADD COLUMN IF NOT EXISTS end_date DATE;
+ALTER TABLE task_schedules ADD COLUMN IF NOT EXISTS remark TEXT NOT NULL DEFAULT '';
 DROP TRIGGER IF EXISTS trg_task_schedules_upd ON task_schedules;
 CREATE TRIGGER trg_task_schedules_upd BEFORE UPDATE ON task_schedules
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

@@ -7,6 +7,7 @@ export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 export interface Task {
   distinct_findings?: FindingDistinctStats;
   id: string;
+  remark?: string;
   name?: string; // 可选任务名称;空/缺省=未命名,展示时回退到描述
   category_id?: number;
   category_name?: string;
@@ -718,6 +719,7 @@ export interface AgentTrigger {
 export interface TaskSchedule {
   id: number;
   name: string;
+  remark?: string;
   enabled: boolean;
   timezone_mode: "beijing" | "system";
   timezone?: string;
