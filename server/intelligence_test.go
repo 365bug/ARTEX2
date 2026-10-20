@@ -32,12 +32,12 @@ func TestIntelligenceHTTPSettingsAndScope(t *testing.T) {
 	}
 	base := fmt.Sprintf("/api/tasks/%d/intelligence", taskID)
 	r := request("GET", base, "")
-	if r.Code != 200 || strings.Contains(r.Body.String(), in.Content) || strings.Contains(r.Body.String(), in.Evidence) {
-		t.Fatalf("list leaked secret: %d %s", r.Code, r.Body)
+	if r.Code != 200 || !strings.Contains(r.Body.String(), in.Content) || !strings.Contains(r.Body.String(), in.Evidence) {
+		t.Fatalf("list omitted content or evidence: %d %s", r.Code, r.Body)
 	}
 	r = request("GET", fmt.Sprintf("%s/%d", base, item.ID), "")
 	if r.Code != 200 || !strings.Contains(r.Body.String(), in.Content) {
-		t.Fatal("explicit reveal failed", r.Code, r.Body)
+		t.Fatal("detail content missing", r.Code, r.Body)
 	}
 	if r = request("PATCH", fmt.Sprintf("%s/%d", base, item.ID), `{"status":"verified"}`); r.Code != 200 {
 		t.Fatal(r.Code, r.Body)

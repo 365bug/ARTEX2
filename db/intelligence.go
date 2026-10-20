@@ -37,7 +37,6 @@ type Intelligence struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Inherited bool      `json:"inherited"`
-	Redacted  bool      `json:"redacted"`
 }
 type IntelligenceFilter struct {
 	TaskID  int64
@@ -238,15 +237,14 @@ func (d *DB) ListIntelligence(ctx context.Context, f IntelligenceFilter) (*Intel
 	if err != nil {
 		return nil, err
 	}
-	// Search metadata only: secrets are never searched or echoed through list endpoints.
+	// Search titles and reporters; return the recorded content directly in each row.
 	where := scope + ` AND ($3='' OR kind=$3) AND ($4='' OR i.status=$4) AND ($5='' OR i.title ILIKE '%'||$5||'%' OR i.worker ILIKE '%'||$5||'%')`
 	args = append(args, f.Kind, f.Status, f.Query)
 	if err = d.QueryRowContext(ctx, `SELECT count(*)`+where, args...).Scan(&page.Total); err != nil {
 		return nil, err
 	}
 	args = append(args, f.Limit, f.Offset)
-	// Do not load credential/data bodies into list responses at all.
-	cols := `i.id,i.task_id,i.node_id,i.kind,i.title,CASE WHEN kind='lead' THEN content ELSE '' END,CASE WHEN kind='lead' THEN evidence ELSE '' END,confidence,i.status,asset_ids,i.worker,i.created_at,i.updated_at`
+	cols := `i.id,i.task_id,i.node_id,i.kind,i.title,i.content,i.evidence,i.confidence,i.status,i.asset_ids,i.worker,i.created_at,i.updated_at`
 	rows, err = d.QueryContext(ctx, `SELECT `+cols+where+` ORDER BY i.id DESC LIMIT $6 OFFSET $7`, args...)
 	if err != nil {
 		return nil, err
@@ -258,7 +256,6 @@ func (d *DB) ListIntelligence(ctx context.Context, f IntelligenceFilter) (*Intel
 			return nil, e
 		}
 		item.Inherited = f.TaskID > 0 && item.TaskID != f.TaskID
-		item.Redacted = item.Kind != "lead"
 		page.Items = append(page.Items, item)
 	}
 	return page, rows.Err()

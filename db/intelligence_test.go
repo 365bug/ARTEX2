@@ -29,7 +29,7 @@ func TestIntelligenceValidation(t *testing.T) {
 		t.Fatalf("normalization failed: %+v %v", got, err)
 	}
 }
-func TestIntelligenceProvenanceDedupAndRedaction(t *testing.T) {
+func TestIntelligenceProvenanceDedupAndDirectContent(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +68,8 @@ func TestIntelligenceProvenanceDedupAndRedaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(page)
-	if page.Total != 1 || !page.Items[0].Redacted || strings.Contains(string(raw), "local-fixture-secret") || strings.Contains(string(raw), "/tmp/fixture") {
-		t.Fatal("list leaked secret or lost record")
+	if page.Total != 1 || !strings.Contains(string(raw), "local-fixture-secret") || !strings.Contains(string(raw), "/tmp/fixture") {
+		t.Fatal("list omitted recorded content or evidence")
 	}
 	if err = d.UpdateIntelligenceStatus(t.Context(), second.ID, item.ID, "verified"); !errors.Is(err, ErrIntelligenceNotFound) {
 		t.Fatalf("cross-task mutation accepted: %v", err)
@@ -117,5 +117,27 @@ func TestIntelligenceArchiveAssetRemapPreservesManualTriage(t *testing.T) {
 	expected := intelligenceFingerprint(IntelligenceInput{Content: "fixture", AssetIDs: []int64{20, 30}})
 	if len(rows) != 1 || rows[0]["fingerprint"] != expected || rows[0]["status"] != "verified" {
 		t.Fatal("remap lost dedup or manual triage")
+	}
+}
+
+func TestIntelligenceSensitiveDataListIncludesContent(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	task, err := d.CreateTask("direct sensitive data display", "local fixture", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	in := IntelligenceInput{Kind: "sensitive_data", Title: "fixture dataset", Content: "qa@example.invalid", Evidence: "/tmp/qa-users.json", Confidence: "observed"}
+	_, err = d.RecordIntelligence(t.Context(), task.ID, 0, "qa", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := d.ListIntelligence(t.Context(), IntelligenceFilter{TaskID: task.ID, Kind: "sensitive_data"})
+	if err != nil || page.Total != 1 || page.Items[0].Content != in.Content || page.Items[0].Evidence != in.Evidence {
+		t.Fatalf("missing sensitive data content: %+v %v", page, err)
 	}
 }

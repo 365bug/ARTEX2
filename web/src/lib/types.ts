@@ -1759,7 +1759,6 @@ export interface TaskIntelligence {
   created_at: string;
   updated_at: string;
   inherited: boolean;
-  redacted: boolean;
 }
 export interface IntelligencePage {
   items: TaskIntelligence[];

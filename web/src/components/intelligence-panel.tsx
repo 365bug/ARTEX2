@@ -4,7 +4,7 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import { CopyIcon, EyeIcon, EyeOffIcon, RefreshCwIcon } from "lucide-react";
+import { CopyIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -52,10 +52,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
   const [error, setError] = React.useState("");
   const [refresh, setRefresh] = React.useState(0);
   const [selected, setSelected] = React.useState<TaskIntelligence | null>(null);
-  const [detail, setDetail] = React.useState<TaskIntelligence | null>(null);
-  const [revealing, setRevealing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  const detailRequest = React.useRef(0);
   React.useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search.trim());
@@ -95,38 +92,14 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
       clearInterval(timer);
     };
   }, [scope, scopeId, kind, status, query, page, refresh]);
-  const open = (item: TaskIntelligence) => {
-    detailRequest.current++;
-    setSelected(item);
-    setDetail(item.redacted ? null : item);
-    setRevealing(false);
-  };
-  const close = () => {
-    detailRequest.current++;
-    setSelected(null);
-    setDetail(null);
-    setRevealing(false);
-  };
-  const reveal = async () => {
-    if (!selected) return;
-    const request = ++detailRequest.current;
-    setRevealing(true);
-    try {
-      const result = await api.intelligenceDetail(scope, scopeId, selected.id);
-      if (request === detailRequest.current) setDetail(result);
-    } catch (e) {
-      if (request === detailRequest.current) toast.error("读取失败：" + (e as Error).message);
-    } finally {
-      if (request === detailRequest.current) setRevealing(false);
-    }
-  };
+  const open = (item: TaskIntelligence) => setSelected(item);
+  const close = () => setSelected(null);
   const update = async (value: string) => {
     if (!selected) return;
     setSaving(true);
     try {
       await api.updateIntelligence(selected.task_id, selected.id, value);
       setSelected((item) => (item ? { ...item, status: value } : null));
-      setDetail((item) => (item ? { ...item, status: value } : null));
       setRefresh((n) => n + 1);
       toast.success("情报状态已更新");
     } catch (e) {
@@ -155,7 +128,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
           <CardTitle>{scope === "tasks" ? "任务情报" : "资产关联情报"}</CardTitle>
           <CardDescription>
             {scope === "tasks" ? "集中查看本次获取与直接关联任务继承的情报。" : "按来源任务查看此资产关联的情报。"}{" "}
-            凭据与敏感数据按需显示，发现凭据不代表验证成功。
+            直接展示凭据、敏感数据及来源证据，发现凭据不代表验证成功。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex min-w-0 flex-col gap-4">
@@ -228,6 +201,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
               <TableHeader>
                 <TableRow>
                   <TableHead>类别 / 标题</TableHead>
+                  <TableHead>内容 / 来源证据</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead>资产</TableHead>
@@ -242,9 +216,17 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                       <div className="flex flex-col items-start gap-1">
                         <Badge variant="secondary">{KINDS.find((k) => k.value === item.kind)?.label}</Badge>
                         <span className="break-words">{item.title}</span>
-                        {item.redacted ? (
-                          <span className="text-xs text-muted-foreground">内容已隐藏 · 查看详情后显示</span>
-                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-64 max-w-md align-top">
+                      <div className="flex flex-col gap-2">
+                        <pre className="whitespace-pre-wrap break-all font-mono text-xs">
+                          {prettyContent(item.content)}
+                        </pre>
+                        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                          <span>来源证据</span>
+                          <p className="whitespace-pre-wrap break-all">{item.evidence}</p>
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -321,7 +303,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{selected?.title ?? "情报详情"}</DialogTitle>
-            <DialogDescription>保留实际来源；凭据与敏感数据仅在点击显示后加载。</DialogDescription>
+            <DialogDescription>完整展示记录内容与实际来源证据。</DialogDescription>
           </DialogHeader>
           {selected ? (
             <div className="flex min-w-0 flex-col gap-4">
@@ -353,52 +335,31 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                   {STATUS[selected.kind][selected.status]} · 请到来源任务修改状态
                 </p>
               )}
-              {selected.kind !== "lead" ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm">内容</span>
                 <Button
-                  variant="outline"
-                  disabled={revealing}
-                  onClick={() => {
-                    if (detail) {
-                      detailRequest.current++;
-                      setDetail(null);
-                    } else void reveal();
+                  size="sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(selected.content);
+                      toast.success("已复制");
+                    } catch {
+                      toast.error("复制失败，请手动选择内容复制");
+                    }
                   }}
                 >
-                  {detail ? <EyeOffIcon data-icon="inline-start" /> : <EyeIcon data-icon="inline-start" />}
-                  {revealing ? "读取中…" : detail ? "隐藏敏感内容" : "显示敏感内容"}
+                  <CopyIcon data-icon="inline-start" />
+                  复制
                 </Button>
-              ) : null}
-              {detail ? (
-                <>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm">内容</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(detail.content);
-                          toast.success("已复制");
-                        } catch {
-                          toast.error("复制失败，请手动选择内容复制");
-                        }
-                      }}
-                    >
-                      <CopyIcon data-icon="inline-start" />
-                      复制
-                    </Button>
-                  </div>
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
-                    {prettyContent(detail.content)}
-                  </pre>
-                  <p className="text-sm">来源证据</p>
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
-                    {detail.evidence}
-                  </pre>
-                </>
-              ) : (
-                <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">敏感内容和来源证据已隐藏</p>
-              )}
+              </div>
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
+                {prettyContent(selected.content)}
+              </pre>
+              <p className="text-sm">来源证据</p>
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
+                {selected.evidence}
+              </pre>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span>关联资产：{selected.asset_ids.map((id) => `#${id}`).join("、") || "未关联"}</span>
                 <span>发现于 {time(selected.created_at)}</span>
