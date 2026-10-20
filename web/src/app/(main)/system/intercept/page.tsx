@@ -201,7 +201,7 @@ const defaultJudge = (): JudgeConfig => ({
   profile_id: 0,
   prompt: "",
   timeout_seconds: 15,
-  retry_count: 0,
+  retry_count: 3,
   retry_interval_ms: 1000,
   fail_action: "ask",
   ask_timeout_seconds: 300,
