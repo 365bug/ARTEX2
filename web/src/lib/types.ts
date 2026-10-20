@@ -1745,6 +1745,7 @@ export interface FindingCaseReviewRun {
 
 export type IntelligenceKind = "credential" | "lead" | "sensitive_data";
 export interface TaskIntelligence {
+  source_session?: string;
   id: number;
   task_id: number;
   node_id?: number;

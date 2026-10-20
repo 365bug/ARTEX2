@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { useSearchParams } from "next/navigation";
+
 import {
   BuildingIcon,
   ChevronLeftIcon,
@@ -108,7 +110,37 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "endpoint", label: "接口", icon: LinkIcon },
 ];
 
-export default function AssetsPage() {
+function AssetsContent() {
+  const searchParams = useSearchParams();
+  const requestedAsset = searchParams.get("asset") ?? "";
+  const [assetTarget, setAssetTarget] = React.useState<{ id: number; type: string }>();
+  const [assetTargetError, setAssetTargetError] = React.useState("");
+  React.useEffect(() => {
+    let alive = true;
+    setAssetTarget(undefined);
+    setAssetTargetError("");
+    if (!/^[1-9]\d*$/.test(requestedAsset)) return;
+    api
+      .searchAssets(`id==${requestedAsset}`, "", 1)
+      .then((r) => {
+        if (!alive) return;
+        const asset = r.assets[0];
+        if (!asset) {
+          setAssetTargetError(`资产 #${requestedAsset} 不存在或已删除`);
+          return;
+        }
+        setAssetTarget({ id: asset.id, type: asset.type });
+        setTab(asset.type);
+        setPage(0);
+        setIntelligenceAsset(null);
+      })
+      .catch((e) => {
+        if (alive) setAssetTargetError((e as Error).message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [requestedAsset]);
   const [intelligenceAsset, setIntelligenceAsset] = React.useState<number | null>(null);
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -232,14 +264,14 @@ export default function AssetsPage() {
   // Reset query + page + selection when switching tabs
   // biome-ignore lint/correctness/useExhaustiveDependencies: tab changes intentionally reset tab-local controls.
   React.useEffect(() => {
-    setQuery("");
+    setQuery(assetTarget?.type === tab ? `id==${assetTarget.id}` : "");
     setDslError("");
     setSelected(new Set());
     setRows([]);
     setRowsTab("");
     setTotal(0);
     setLoaded(false);
-  }, [tab]);
+  }, [tab, assetTarget]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these controls intentionally reset server pagination.
   React.useEffect(() => setPage(0), [tab, size, query]);
@@ -316,6 +348,11 @@ export default function AssetsPage() {
 
   return (
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
+      {assetTargetError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {assetTargetError}
+        </p>
+      ) : null}
       <Dialog
         open={intelligenceAsset !== null}
         onOpenChange={(open) => {
@@ -328,7 +365,12 @@ export default function AssetsPage() {
             <DialogDescription>按来源任务查看凭据、线索和敏感数据。</DialogDescription>
           </DialogHeader>
           {intelligenceAsset !== null ? (
-            <IntelligencePanel key={intelligenceAsset} scope="assets" scopeId={String(intelligenceAsset)} />
+            <IntelligencePanel
+              key={intelligenceAsset}
+              scope="assets"
+              scopeId={String(intelligenceAsset)}
+              onNavigate={() => setIntelligenceAsset(null)}
+            />
           ) : null}
         </DialogContent>
       </Dialog>
@@ -1241,5 +1283,13 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export default function AssetsPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <AssetsContent />
+    </React.Suspense>
   );
 }

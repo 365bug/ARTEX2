@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -139,5 +140,89 @@ func TestIntelligenceSensitiveDataListIncludesContent(t *testing.T) {
 	page, err := d.ListIntelligence(t.Context(), IntelligenceFilter{TaskID: task.ID, Kind: "sensitive_data"})
 	if err != nil || page.Total != 1 || page.Items[0].Content != in.Content || page.Items[0].Evidence != in.Evidence {
 		t.Fatalf("missing sensitive data content: %+v %v", page, err)
+	}
+}
+
+func TestIntelligenceSourceSessionUsesGraphProvenance(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	task, err := d.CreateTask("source navigation", "local fixture", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	store := d.Exploration(task.ExplorationID)
+	intent, err := store.AddIntent(map[string]any{"summary": "origin worker"}, 5, nil, "qa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := store.AddNode("fact", map[string]any{"summary": "reported observation"}, 0, "confirmed", "qa", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Link(intent, RelYields, fact); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range []int64{intent, fact} {
+		in := testIntelligenceInput()
+		in.Content = fmt.Sprintf("fixture node %d", node)
+		item, err := d.RecordIntelligence(t.Context(), task.ID, node, "work#3", in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := d.GetIntelligence(t.Context(), item.ID)
+		if err != nil || got.SourceSession != fmt.Sprintf("intent:%d", intent) {
+			t.Fatalf("wrong source: %+v %v", got, err)
+		}
+	}
+	page, err := d.ListIntelligence(t.Context(), IntelligenceFilter{TaskID: task.ID})
+	if err != nil || len(page.Items) != 2 {
+		t.Fatalf("list: %+v %v", page, err)
+	}
+	for _, item := range page.Items {
+		if item.SourceSession != fmt.Sprintf("intent:%d", intent) {
+			t.Fatalf("list source: %+v", item)
+		}
+	}
+	// Multiple yielding parents must not send the user to an arbitrary worker.
+	other, err := store.AddIntent(map[string]any{"summary": "other worker"}, 5, nil, "qa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Link(other, RelYields, fact); err != nil {
+		t.Fatal(err)
+	}
+	page, err = d.ListIntelligence(t.Context(), IntelligenceFilter{TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if *item.NodeID == fact && item.SourceSession != "" {
+			t.Fatalf("ambiguous fact has exact session: %+v", item)
+		}
+	}
+	// No guessed session from a display label when graph provenance is absent.
+	in := testIntelligenceInput()
+	in.Content = "orphan fixture"
+	item, err := d.RecordIntelligence(t.Context(), task.ID, 0, "work#3", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.GetIntelligence(t.Context(), item.ID)
+	if err != nil || got.SourceSession != "" {
+		t.Fatalf("guessed session: %+v %v", got, err)
+	}
+	// Asset IDs resolve across categories.
+	assetID, err := d.Assets().UpsertHTTPService(UpsertHTTPServiceReq{URL: fmt.Sprintf("https://navigation-%d.example.invalid", task.ID), TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Exec(`DELETE FROM assets WHERE id=$1`, assetID)
+	assets, err := d.Assets().QueryDSL(fmt.Sprintf("id==%d", assetID), "", 0, 1, 0)
+	if err != nil || len(assets) != 1 || assets[0].ID != assetID {
+		t.Fatalf("asset ID lookup failed: %+v %v", assets, err)
 	}
 }

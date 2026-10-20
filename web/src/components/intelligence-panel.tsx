@@ -44,7 +44,35 @@ function time(value: string) {
   return new Date(value).toLocaleString("zh-CN");
 }
 
-export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets"; scopeId: string }) {
+function AssetLinks({ ids, onNavigate }: { ids: number[]; onNavigate?: () => void }) {
+  return ids.length ? (
+    <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
+      {ids.map((id) => (
+        <Link
+          key={id}
+          href={`/function/assets?asset=${id}`}
+          onClick={onNavigate}
+          className="underline underline-offset-2"
+          aria-label={`查看资产 #${id}`}
+        >
+          #{id}
+        </Link>
+      ))}
+    </span>
+  ) : (
+    <>未关联</>
+  );
+}
+
+export function IntelligencePanel({
+  scope,
+  scopeId,
+  onNavigate,
+}: {
+  scope: "tasks" | "assets";
+  scopeId: string;
+  onNavigate?: () => void;
+}) {
   const [kind, setKind] = React.useState("all");
   const [status, setStatus] = React.useState("all");
   const [search, setSearch] = React.useState("");
@@ -96,6 +124,10 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
   }, [scope, scopeId, kind, status, query, page, refresh]);
   const open = (item: TaskIntelligence) => setSelected(item);
   const close = () => setSelected(null);
+  const navigate = () => {
+    close();
+    onNavigate?.();
+  };
   const update = async (value: string) => {
     if (!selected) return;
     setSaving(true);
@@ -251,7 +283,11 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                     </TableCell>
                     <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
                       <div className="flex flex-col gap-1">
-                        <Link href={`/function/tasks/detail?id=${item.task_id}&tab=intelligence`} className="underline">
+                        <Link
+                          href={`/function/tasks/detail?id=${item.task_id}&tab=intelligence`}
+                          onClick={navigate}
+                          className="underline"
+                        >
                           任务 #{item.task_id}
                         </Link>
                         <span className="text-xs text-muted-foreground">
@@ -262,7 +298,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                       </div>
                     </TableCell>
                     <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
-                      {item.asset_ids.length ? item.asset_ids.map((id) => `#${id}`).join("、") : "未关联"}
+                      <AssetLinks ids={item.asset_ids} onNavigate={navigate} />
                     </TableCell>
                     <TableCell className="align-top whitespace-normal text-xs">{time(item.created_at)}</TableCell>
                     <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
@@ -373,11 +409,18 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                 {selected.evidence}
               </pre>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span>关联资产：{selected.asset_ids.map((id) => `#${id}`).join("、") || "未关联"}</span>
+                <span>
+                  关联资产：
+                  <AssetLinks ids={selected.asset_ids} onNavigate={navigate} />
+                </span>
                 <span>发现于 {time(selected.created_at)}</span>
               </div>
-              <Link href={`/function/tasks/detail?id=${selected.task_id}&tab=sessions`} className="text-sm underline">
-                查看来源任务会话
+              <Link
+                href={`/function/tasks/detail?id=${selected.task_id}&tab=sessions${selected.source_session ? `&session=${encodeURIComponent(selected.source_session)}` : ""}`}
+                onClick={navigate}
+                className="text-sm underline"
+              >
+                {selected.source_session ? "查看来源任务会话" : "查看来源任务"}
               </Link>
             </div>
           ) : null}

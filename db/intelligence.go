@@ -30,13 +30,14 @@ type IntelligenceInput struct {
 }
 type Intelligence struct {
 	IntelligenceInput
-	ID        int64     `json:"id"`
-	TaskID    int64     `json:"task_id"`
-	NodeID    *int64    `json:"node_id,omitempty"`
-	Worker    string    `json:"worker"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Inherited bool      `json:"inherited"`
+	ID            int64     `json:"id"`
+	TaskID        int64     `json:"task_id"`
+	NodeID        *int64    `json:"node_id,omitempty"`
+	Worker        string    `json:"worker"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Inherited     bool      `json:"inherited"`
+	SourceSession string    `json:"source_session,omitempty"`
 }
 type IntelligenceFilter struct {
 	TaskID  int64
@@ -133,10 +134,22 @@ func intelligenceFingerprint(in IntelligenceInput) string {
 
 const intelligenceCols = `id,task_id,node_id,kind,title,content,evidence,confidence,status,asset_ids,worker,created_at,updated_at`
 
-func scanIntelligence(row interface{ Scan(...any) error }) (*Intelligence, error) {
+// Resolve provenance from the graph, never from a worker's display number.
+// A fact with ambiguous/missing parents deliberately has no exact session link.
+const intelligenceSourceSession = `, COALESCE(
+ (SELECT 'intent:' || n.id::text FROM exploration_nodes n WHERE n.id=i.node_id AND n.exploration_id=t.exploration_id AND n.kind='intent'),
+ (SELECT 'intent:' || min(n.id)::text FROM exploration_edges e JOIN exploration_nodes n ON n.id=e.src_id AND n.kind='intent'
+  WHERE e.dst_id=i.node_id AND e.rel='yields' AND e.exploration_id=t.exploration_id AND n.exploration_id=t.exploration_id HAVING count(*)=1),
+ CASE WHEN i.worker='planner' THEN 'plan' ELSE '' END)`
+
+func scanIntelligence(row interface{ Scan(...any) error }, withSource ...bool) (*Intelligence, error) {
 	item := &Intelligence{}
 	var assets []byte
-	err := row.Scan(&item.ID, &item.TaskID, &item.NodeID, &item.Kind, &item.Title, &item.Content, &item.Evidence, &item.Confidence, &item.Status, &assets, &item.Worker, &item.CreatedAt, &item.UpdatedAt)
+	dest := []any{&item.ID, &item.TaskID, &item.NodeID, &item.Kind, &item.Title, &item.Content, &item.Evidence, &item.Confidence, &item.Status, &assets, &item.Worker, &item.CreatedAt, &item.UpdatedAt}
+	if len(withSource) > 0 && withSource[0] {
+		dest = append(dest, &item.SourceSession)
+	}
+	err := row.Scan(dest...)
 	if err != nil {
 		return nil, err
 	}
@@ -245,13 +258,13 @@ func (d *DB) ListIntelligence(ctx context.Context, f IntelligenceFilter) (*Intel
 	}
 	args = append(args, f.Limit, f.Offset)
 	cols := `i.id,i.task_id,i.node_id,i.kind,i.title,i.content,i.evidence,i.confidence,i.status,i.asset_ids,i.worker,i.created_at,i.updated_at`
-	rows, err = d.QueryContext(ctx, `SELECT `+cols+where+` ORDER BY i.id DESC LIMIT $6 OFFSET $7`, args...)
+	rows, err = d.QueryContext(ctx, `SELECT `+cols+intelligenceSourceSession+where+` ORDER BY i.id DESC LIMIT $6 OFFSET $7`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		item, e := scanIntelligence(rows)
+		item, e := scanIntelligence(rows, true)
 		if e != nil {
 			return nil, e
 		}
@@ -261,7 +274,7 @@ func (d *DB) ListIntelligence(ctx context.Context, f IntelligenceFilter) (*Intel
 	return page, rows.Err()
 }
 func (d *DB) GetIntelligence(ctx context.Context, id int64) (*Intelligence, error) {
-	item, err := scanIntelligence(d.QueryRowContext(ctx, `SELECT `+intelligenceCols+` FROM task_intelligence WHERE id=$1 AND EXISTS(SELECT 1 FROM tasks WHERE tasks.id=task_intelligence.task_id AND deleted_at IS NULL)`, id))
+	item, err := scanIntelligence(d.QueryRowContext(ctx, `SELECT i.id,i.task_id,i.node_id,i.kind,i.title,i.content,i.evidence,i.confidence,i.status,i.asset_ids,i.worker,i.created_at,i.updated_at`+intelligenceSourceSession+` FROM task_intelligence i JOIN tasks t ON t.id=i.task_id AND t.deleted_at IS NULL WHERE i.id=$1`, id), true)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrIntelligenceNotFound
 	}
