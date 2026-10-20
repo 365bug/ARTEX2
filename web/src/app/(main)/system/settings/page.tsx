@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,10 +16,12 @@ import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
 import type { Settings } from "@/lib/types";
 
-import { UpdateCard } from "./_components/update-card";
 import { BasicAuthCard } from "./_components/basic-auth-card";
+import { UpdateCard } from "./_components/update-card";
 
 export default function SystemSettingsPage() {
+  const [intelligenceEnabled, setIntelligenceEnabled] = React.useState(false);
+  const [savingIntelligence, setSavingIntelligence] = React.useState(false);
   const [trafficCapture, setTrafficCapture] = React.useState(false);
   const [agentTrafficBinding, setAgentTrafficBinding] = React.useState(false);
   const [webSearch, setWebSearch] = React.useState(false);
@@ -48,6 +51,7 @@ export default function SystemSettingsPage() {
   const sendMode = useChatSendMode();
 
   const apply = React.useCallback((s: Settings) => {
+    setIntelligenceEnabled(!!s.task_intelligence_enabled);
     setTrafficCapture(!!s.traffic_capture);
     setAgentTrafficBinding(!!s.agent_traffic_binding);
     setWebSearch(!!s.web_search_enabled);
@@ -436,6 +440,41 @@ export default function SystemSettingsPage() {
 
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
+            <CardTitle>任务情报</CardTitle>
+            <CardDescription>自动记录任务中获取的凭据、重要线索和敏感数据，并保留来源证据。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel htmlFor="task-intelligence">Agent 自动记录</FieldLabel>
+                <FieldDescription>
+                  默认关闭。开启会增加提示和上报的 Token 消耗，不启动额外总结 Agent。 对后续 Agent
+                  执行生效；关闭后停止新增记录，已有情报仍可查看。
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="task-intelligence"
+                checked={intelligenceEnabled}
+                disabled={!loaded || savingIntelligence}
+                onCheckedChange={async (value) => {
+                  setSavingIntelligence(true);
+                  try {
+                    const settings = await api.setSettings({ task_intelligence_enabled: value });
+                    setIntelligenceEnabled(!!settings.task_intelligence_enabled);
+                    toast.success(value ? "任务情报自动记录已开启" : "任务情报自动记录已关闭");
+                  } catch (error) {
+                    toast.error("保存失败：" + (error as Error).message);
+                  } finally {
+                    setSavingIntelligence(false);
+                  }
+                }}
+              />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <SearchIcon className="size-4" />
               网络搜索
@@ -446,8 +485,8 @@ export default function SystemSettingsPage() {
               记录代理，独立于流量捕获。
               <br />
               来源可选 <b>DuckDuckGo（ddgs）</b>（无需 Key）、<b>Brave（免费版）</b>（需填写 Brave API Key）、{" "}
-              <b>Tavily</b>（需填写 Tavily API Key）或 <b>DeepSeek</b>（复用当前 LLM 配置）。总开关关闭时，各
-              Agent 的网络搜索开关不可用。
+              <b>Tavily</b>（需填写 Tavily API Key）或 <b>DeepSeek</b>（复用当前 LLM 配置）。总开关关闭时，各 Agent
+              的网络搜索开关不可用。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">

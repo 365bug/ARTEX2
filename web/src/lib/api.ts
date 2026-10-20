@@ -50,6 +50,7 @@ import type {
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
+  IntelligencePage,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -91,6 +92,7 @@ import type {
   TaskCategory,
   TaskConstraint,
   TaskGoal,
+  TaskIntelligence,
   TaskLLMResolutions,
   TaskNode,
   TaskSchedule,
@@ -337,7 +339,8 @@ export const api = {
   runScheduleNow: (id: number) =>
     post<{ ok: boolean; started: number; errors?: string[] }>(`/schedules/${id}/run-now`, {}),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
-  updateTask: (id: string, input: { name?: string; pinned?: boolean; remark?: string }) => patch<Task>(`/tasks/${id}`, input),
+  updateTask: (id: string, input: { name?: string; pinned?: boolean; remark?: string }) =>
+    patch<Task>(`/tasks/${id}`, input),
   renameTask: (id: string, name: string) => patch<Task>(`/tasks/${id}`, { name }),
   pinTask: (id: string, pinned: boolean) => patch<Task>(`/tasks/${id}`, { pinned }),
   createTaskCategory: (name: string) => post<TaskCategory>("/task-categories", { name }),
@@ -913,6 +916,12 @@ export const api = {
   trafficDeleteAll: () => del<{ deleted: number; reclaimed: number }>(`/traffic/all`),
 
   // ---- app settings (runtime toggles) ----
+  intelligence: (scope: "tasks" | "assets", id: string, query: URLSearchParams) =>
+    get<IntelligencePage>(`/${scope}/${id}/intelligence?${query.toString()}`),
+  intelligenceDetail: (scope: "tasks" | "assets", id: string, intelligenceId: number) =>
+    get<TaskIntelligence>(`/${scope}/${id}/intelligence/${intelligenceId}`),
+  updateIntelligence: (taskId: number, intelligenceId: number, status: string) =>
+    patch<{ updated: boolean }>(`/tasks/${taskId}/intelligence/${intelligenceId}`, { status }),
   settings: () => get<Settings>(`/settings`),
   basicAuthSettings: () => get<{ enabled: boolean; username: string; password_set: boolean }>("/settings/basic-auth"),
   setBasicAuthSettings: (settings: { enabled: boolean; username: string; password: string }) =>

@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 
 import { AssetDslSearch } from "@/components/asset-dsl-search";
+import { IntelligencePanel } from "@/components/intelligence-panel";
 import { ScopeTextEditor } from "@/components/scope-text-editor";
 import {
   AlertDialog,
@@ -108,6 +109,7 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
 ];
 
 export default function AssetsPage() {
+  const [intelligenceAsset, setIntelligenceAsset] = React.useState<number | null>(null);
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [companies, setCompanies] = React.useState<Company[]>([]);
@@ -314,6 +316,22 @@ export default function AssetsPage() {
 
   return (
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
+      <Dialog
+        open={intelligenceAsset !== null}
+        onOpenChange={(open) => {
+          if (!open) setIntelligenceAsset(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>资产 #{intelligenceAsset} 的关联情报</DialogTitle>
+            <DialogDescription>按来源任务查看凭据、线索和敏感数据。</DialogDescription>
+          </DialogHeader>
+          {intelligenceAsset !== null ? (
+            <IntelligencePanel key={intelligenceAsset} scope="assets" scopeId={String(intelligenceAsset)} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">资产</h1>
@@ -322,6 +340,17 @@ export default function AssetsPage() {
           <span className="text-sm text-muted-foreground">
             共 <span className="tabular-nums">{totalAssets}</span> 项资产
           </span>
+          {tab !== "company" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={selected.size !== 1}
+              title="选择一项资产查看关联情报"
+              onClick={() => setIntelligenceAsset(Array.from(selected)[0])}
+            >
+              关联情报
+            </Button>
+          ) : null}
           {selected.size > 0 && (
             <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
               <Trash2Icon className="size-3.5" /> 删除已选 ({selected.size})

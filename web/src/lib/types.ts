@@ -947,6 +947,7 @@ export interface TrafficHost {
 // ---- App settings (runtime toggles) ----
 export interface Settings {
   traffic_capture: boolean;
+  task_intelligence_enabled: boolean; // 默认关闭；关闭不注入情报工具或提示
   agent_traffic_binding: boolean; // Agent 自动绑定流量证据，默认关闭；不影响人工绑定
   llm_record: boolean; // LLM 录制开关（默认关）；关闭时不记录任何 LLM 调用
   // Web search. brave_key_set / tavily_key_set reflect whether a key is stored
@@ -1740,4 +1741,29 @@ export interface FindingCaseReviewRun {
   task_id: string;
   state: "queued" | "running" | "done" | "failed";
   error: string;
+}
+
+export type IntelligenceKind = "credential" | "lead" | "sensitive_data";
+export interface TaskIntelligence {
+  id: number;
+  task_id: number;
+  node_id?: number;
+  kind: IntelligenceKind;
+  title: string;
+  content: string;
+  evidence: string;
+  confidence: "observed" | "inferred";
+  status: string;
+  asset_ids: number[];
+  worker: string;
+  created_at: string;
+  updated_at: string;
+  inherited: boolean;
+  redacted: boolean;
+}
+export interface IntelligencePage {
+  items: TaskIntelligence[];
+  total: number;
+  counts: Record<IntelligenceKind, number>;
+  enabled: boolean;
 }
