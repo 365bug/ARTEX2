@@ -44,6 +44,10 @@ function time(value: string) {
   return new Date(value).toLocaleString("zh-CN");
 }
 
+function conversationHref(item: TaskIntelligence) {
+  return `/function/tasks/detail?id=${item.task_id}&tab=sessions${item.source_session ? `&session=${encodeURIComponent(item.source_session)}` : ""}`;
+}
+
 function AssetLinks({ ids, onNavigate }: { ids: number[]; onNavigate?: () => void }) {
   return ids.length ? (
     <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
@@ -247,7 +251,7 @@ export function IntelligencePanel({
                   <TableHead>类别 / 标题</TableHead>
                   <TableHead>内容 / 来源证据</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead>来源</TableHead>
+                  <TableHead>对话</TableHead>
                   <TableHead>资产</TableHead>
                   <TableHead>发现时间</TableHead>
                   <TableHead>操作</TableHead>
@@ -283,15 +287,11 @@ export function IntelligencePanel({
                     </TableCell>
                     <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
                       <div className="flex flex-col gap-1">
-                        <Link
-                          href={`/function/tasks/detail?id=${item.task_id}&tab=intelligence`}
-                          onClick={navigate}
-                          className="underline"
-                        >
-                          任务 #{item.task_id}
+                        <Link href={conversationHref(item)} onClick={navigate} className="underline">
+                          {item.source_session ? "查看对话" : "查看任务对话"}
                         </Link>
                         <span className="text-xs text-muted-foreground">
-                          {item.worker || "Agent"}
+                          任务 #{item.task_id} · {item.worker || "Agent"}
                           {item.node_id ? ` · 节点 #${item.node_id}` : ""}
                         </span>
                         {item.inherited ? <Badge variant="outline">继承 · 只读</Badge> : null}
@@ -415,11 +415,7 @@ export function IntelligencePanel({
                 </span>
                 <span>发现于 {time(selected.created_at)}</span>
               </div>
-              <Link
-                href={`/function/tasks/detail?id=${selected.task_id}&tab=sessions${selected.source_session ? `&session=${encodeURIComponent(selected.source_session)}` : ""}`}
-                onClick={navigate}
-                className="text-sm underline"
-              >
+              <Link href={conversationHref(selected)} onClick={navigate} className="text-sm underline">
                 {selected.source_session ? "查看来源任务会话" : "查看来源任务"}
               </Link>
             </div>
