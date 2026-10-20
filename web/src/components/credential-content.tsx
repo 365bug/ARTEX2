@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { CopyIcon } from "lucide-react";
+import { ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, NetworkIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { HttpCodeBlock } from "@/components/http-code-block";
@@ -14,8 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { toneClasses } from "@/lib/status";
-import type { CredentialAccount, CredentialTrafficDetail, TaskIntelligence } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type { CredentialAccount, CredentialTraffic, CredentialTrafficDetail, TaskIntelligence } from "@/lib/types";
+import { cn, copyText } from "@/lib/utils";
 
 export function intelligencePreview(text: string, limit = 260) {
   const chars = Array.from(text);
@@ -52,6 +52,93 @@ function HighlightedOriginal({ text, accounts }: { text: string; accounts: Crede
     </pre>
   );
 }
+function TrafficList({
+  traffic,
+  detail,
+  onTraffic,
+  onDetails,
+}: {
+  traffic: CredentialTraffic[];
+  detail: boolean;
+  onTraffic?: (id: string) => void;
+  onDetails?: () => void;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+  const limit = detail ? 3 : 2;
+  const visible = detail && expanded ? traffic : traffic.slice(0, limit);
+  const remaining = traffic.length - limit;
+  return (
+    <section aria-label="关联流量" className="min-w-0 space-y-2 rounded-lg border bg-muted/20 p-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        <NetworkIcon className="size-3.5 text-muted-foreground" />
+        关联流量
+        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{traffic.length} 条</span>
+      </div>
+      <div className={cn("space-y-1.5", detail && expanded && "max-h-80 overflow-y-auto pr-1")}>
+        {visible.map((ref) => {
+          let host = "",
+            path = ref.url;
+          try {
+            const url = new URL(ref.url);
+            host = url.host;
+            path = `${url.pathname}${url.search}${url.hash}`;
+          } catch {
+            // Retain non-URL references as plain text.
+          }
+          const tone =
+            ref.status >= 500
+              ? "red"
+              : ref.status >= 400
+                ? "amber"
+                : ref.status >= 300
+                  ? "blue"
+                  : ref.status >= 200
+                    ? "green"
+                    : "neutral";
+          return (
+            <button
+              key={ref.id}
+              type="button"
+              title={ref.url}
+              aria-label={`查看流量 ${ref.method} ${ref.url}，编号 ${ref.id}`}
+              onClick={() => onTraffic?.(ref.id)}
+              className="group flex w-full min-w-0 flex-col gap-1.5 rounded-md border bg-background p-2 text-left transition-colors hover:border-primary/40 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex w-full min-w-0 items-center gap-1.5">
+                <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+                  {ref.method || "HTTP"}
+                </Badge>
+                {ref.status > 0 ? (
+                  <Badge variant="outline" className={cn("shrink-0 font-mono text-[10px]", toneClasses[tone])}>
+                    {ref.status}
+                  </Badge>
+                ) : null}
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{host || "流量记录"}</span>
+                <ArrowUpRightIcon className="size-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+              </span>
+              <span className="block w-full truncate font-mono text-xs">{path}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {ref.side === "request" ? "请求中使用" : "响应中发现"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {remaining > 0 ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-full text-xs text-muted-foreground"
+          aria-expanded={detail ? expanded : undefined}
+          onClick={detail ? () => setExpanded(!expanded) : onDetails}
+        >
+          {detail ? (expanded ? "收起流量" : `展开其余 ${remaining} 条流量`) : `还有 ${remaining} 条流量，查看详情`}
+          {detail ? expanded ? <ChevronUpIcon /> : <ChevronDownIcon /> : <ArrowUpRightIcon />}
+        </Button>
+      ) : null}
+    </section>
+  );
+}
 export function CredentialContent({
   item,
   detail = false,
@@ -84,18 +171,16 @@ export function CredentialContent({
   }
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {analysis ? (
+      {analysis && analysis.state !== "error" ? (
         <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           <Badge variant="outline">
             {analysis.state === "processing"
               ? "正在整理"
               : analysis.state === "queued"
                 ? "等待整理"
-                : analysis.state === "error"
-                  ? "整理失败"
-                  : analysis.method === "rules"
-                    ? "规则整理"
-                    : "Agent 整理"}
+                : analysis.method === "rules"
+                  ? "规则整理"
+                  : "Agent 整理"}
           </Badge>
           {analysis.method === "rules" ? <span>未调用模型</span> : null}
           {detail && analysis.model ? (
@@ -107,7 +192,7 @@ export function CredentialContent({
             </span>
           ) : null}
         </div>
-      ) : enabled && item.kind === "credential" ? (
+      ) : !analysis && enabled && item.kind === "credential" ? (
         <span className="text-xs text-muted-foreground">等待凭据整理</span>
       ) : null}
       {ready ? (
@@ -155,12 +240,10 @@ export function CredentialContent({
                           variant="ghost"
                           size="icon-xs"
                           aria-label={`复制${label} ${index + 1}`}
-                          onClick={() =>
-                            void navigator.clipboard
-                              .writeText(account[field] ?? "")
-                              .then(() => toast.success(`${label}已复制`))
-                              .catch(() => toast.error("复制失败"))
-                          }
+                          onClick={async () => {
+                            if (await copyText(account[field] ?? "")) toast.success(`${label}已复制`);
+                            else toast.error("复制失败，请手动选择内容复制");
+                          }}
                         >
                           <CopyIcon />
                         </Button>
@@ -178,26 +261,15 @@ export function CredentialContent({
           {accounts.length > 2 ? `还有 ${accounts.length - 2} 组凭据，查看详情` : "查看完整凭据"}
         </Button>
       ) : null}
-      {analysis?.error ? (
-        <p role="status" className="break-all text-xs text-destructive">
-          {analysis.error}
-        </p>
-      ) : null}
-      {analysis?.note ? <p className="text-xs text-muted-foreground">{analysis.note}</p> : null}
+      {ready && analysis?.note ? <p className="text-xs text-muted-foreground">{analysis.note}</p> : null}
       {analysis?.traffic?.length ? (
-        <div className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">关联流量 · {analysis.traffic.length} 条</span>
-          {analysis.traffic.map((ref) => (
-            <button
-              type="button"
-              key={ref.id}
-              className="text-left underline underline-offset-2 [overflow-wrap:anywhere]"
-              onClick={() => onTraffic?.(ref.id)}
-            >
-              {ref.method} {ref.url} · {ref.side === "request" ? "请求中使用" : "响应中发现"}
-            </button>
-          ))}
-        </div>
+        <TrafficList
+          key={item.id}
+          traffic={analysis.traffic}
+          detail={detail}
+          onTraffic={onTraffic}
+          onDetails={onDetails}
+        />
       ) : null}
       {detail && analysis?.traffic_note ? (
         <p className="text-xs text-muted-foreground">{analysis.traffic_note}</p>

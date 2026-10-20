@@ -23,6 +23,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { IntelligenceKind, IntelligencePage, TaskIntelligence } from "@/lib/types";
+import { copyText } from "@/lib/utils";
 
 const KINDS: { value: IntelligenceKind; label: string }[] = [
   { value: "credential", label: "凭据" },
@@ -397,12 +398,8 @@ export function IntelligencePanel({
                   size="sm"
                   variant="ghost"
                   onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(selected.content);
-                      toast.success("已复制");
-                    } catch {
-                      toast.error("复制失败，请手动选择内容复制");
-                    }
+                    if (await copyText(selected.content)) toast.success("已复制");
+                    else toast.error("复制失败，请手动选择内容复制");
                   }}
                 >
                   <CopyIcon data-icon="inline-start" />
