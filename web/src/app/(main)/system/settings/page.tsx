@@ -20,6 +20,9 @@ import { BasicAuthCard } from "./_components/basic-auth-card";
 import { UpdateCard } from "./_components/update-card";
 
 export default function SystemSettingsPage() {
+  const [credentialAgent, setCredentialAgent] = React.useState(false);
+  const [credentialBinding, setCredentialBinding] = React.useState(false);
+  const [savingCredentials, setSavingCredentials] = React.useState(false);
   const [intelligenceEnabled, setIntelligenceEnabled] = React.useState(false);
   const [savingIntelligence, setSavingIntelligence] = React.useState(false);
   const [trafficCapture, setTrafficCapture] = React.useState(false);
@@ -51,6 +54,8 @@ export default function SystemSettingsPage() {
   const sendMode = useChatSendMode();
 
   const apply = React.useCallback((s: Settings) => {
+    setCredentialAgent(!!s.credential_agent_enabled);
+    setCredentialBinding(!!s.credential_traffic_binding);
     setIntelligenceEnabled(!!s.task_intelligence_enabled);
     setTrafficCapture(!!s.traffic_capture);
     setAgentTrafficBinding(!!s.agent_traffic_binding);
@@ -259,6 +264,20 @@ export default function SystemSettingsPage() {
   // brave-free selected but no key stored and none being entered → tool stays off.
   const braveNeedsKey = webSearch && backend === "brave-free" && !braveKeySet;
 
+  const saveCredentialOptions = async (patch: Partial<Settings>) => {
+    setSavingCredentials(true);
+    try {
+      const s = await api.setSettings(patch);
+      setCredentialAgent(!!s.credential_agent_enabled);
+      setCredentialBinding(!!s.credential_traffic_binding);
+      setIntelligenceEnabled(!!s.task_intelligence_enabled);
+      toast.success("凭据处理设置已保存");
+    } catch (e) {
+      toast.error("保存失败：" + (e as Error).message);
+    } finally {
+      setSavingCredentials(false);
+    }
+  };
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div>
@@ -448,19 +467,21 @@ export default function SystemSettingsPage() {
               <FieldContent>
                 <FieldLabel htmlFor="task-intelligence">Agent 自动记录</FieldLabel>
                 <FieldDescription>
-                  默认关闭。开启会增加提示和上报的 Token 消耗，不启动额外总结 Agent。 对后续 Agent
-                  执行生效；关闭后停止新增记录，已有情报仍可查看。
+                  默认关闭。任务执行时上报凭据、重要线索和敏感数据，会增加任务 Agent 的提示与上报
+                  Token。仅负责记录，不启动凭据整理。关闭后同时停用下方 Agent 与流量绑定，已有情报和整理结果仍可查看。
                 </FieldDescription>
               </FieldContent>
               <Switch
                 id="task-intelligence"
                 checked={intelligenceEnabled}
-                disabled={!loaded || savingIntelligence}
+                disabled={!loaded || savingIntelligence || savingCredentials}
                 onCheckedChange={async (value) => {
                   setSavingIntelligence(true);
                   try {
                     const settings = await api.setSettings({ task_intelligence_enabled: value });
                     setIntelligenceEnabled(!!settings.task_intelligence_enabled);
+                    setCredentialAgent(!!settings.credential_agent_enabled);
+                    setCredentialBinding(!!settings.credential_traffic_binding);
                     toast.success(value ? "任务情报自动记录已开启" : "任务情报自动记录已关闭");
                   } catch (error) {
                     toast.error("保存失败：" + (error as Error).message);
@@ -470,6 +491,40 @@ export default function SystemSettingsPage() {
                 }}
               />
             </Field>
+            <Field orientation="horizontal" className="mt-5">
+              <FieldContent>
+                <FieldLabel htmlFor="credential-agent">Agent 开关</FieldLabel>
+                <FieldDescription>
+                  默认关闭。独立整理已有和新增凭据，拆分并高亮账号、密码、Token 和
+                  Cookie，不改变原始上报或验证状态。复杂文本会使用额外模型 Token；可解析的 JSON
+                  无需模型。需先开启上方自动记录。模型可在「Agent → 凭据整理」中配置。
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="credential-agent"
+                checked={credentialAgent}
+                disabled={!loaded || savingCredentials || savingIntelligence || !intelligenceEnabled}
+                onCheckedChange={(value) => void saveCredentialOptions({ credential_agent_enabled: value })}
+              />
+            </Field>
+            {credentialAgent ? (
+              <Field orientation="horizontal" className="mt-5">
+                <FieldContent>
+                  <FieldLabel htmlFor="credential-traffic">绑定流量</FieldLabel>
+                  <FieldDescription>
+                    默认关闭，仅在 Agent
+                    开关开启时可用。核对已抓取流量中的资产与凭据，关联真实请求或响应并保存匹配片段；不主动登录，也不把匹配流量视为验证成功。关闭
+                    Agent 时同时停用，已有绑定保留。
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  id="credential-traffic"
+                  checked={credentialBinding}
+                  disabled={!loaded || savingCredentials}
+                  onCheckedChange={(value) => void saveCredentialOptions({ credential_traffic_binding: value })}
+                />
+              </Field>
+            ) : null}
           </CardContent>
         </Card>
 

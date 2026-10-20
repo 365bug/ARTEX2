@@ -7,6 +7,7 @@ import Link from "next/link";
 import { CopyIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { CredentialContent, CredentialTrafficViewer, intelligencePreview } from "@/components/credential-content";
 import { StatusBadge, ToneDot } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -33,13 +34,6 @@ const STATUS: Record<IntelligenceKind, Record<string, string>> = {
   lead: { pending: "待跟进", in_progress: "跟进中", dismissed: "已排除", converted: "已转漏洞" },
   sensitive_data: { suspected: "疑似", confirmed: "已确认", dismissed: "已排除" },
 };
-function prettyContent(value: string) {
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2);
-  } catch {
-    return value;
-  }
-}
 function time(value: string) {
   return new Date(value).toLocaleString("zh-CN");
 }
@@ -87,6 +81,12 @@ export function IntelligencePanel({
   const [refresh, setRefresh] = React.useState(0);
   const [selected, setSelected] = React.useState<TaskIntelligence | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [retrying, setRetrying] = React.useState(false);
+  const [trafficTarget, setTrafficTarget] = React.useState<{ item: TaskIntelligence; id: string } | null>(null);
+  React.useEffect(() => {
+    if (data)
+      setSelected((current) => (current ? (data.items.find((item) => item.id === current.id) ?? current) : null));
+  }, [data]);
   React.useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search.trim());
@@ -268,12 +268,20 @@ export function IntelligencePanel({
                     </TableCell>
                     <TableCell className="align-top whitespace-normal">
                       <div className="flex min-w-0 flex-col gap-2">
-                        <pre className="whitespace-pre-wrap break-all font-mono text-xs">
-                          {prettyContent(item.content)}
-                        </pre>
+                        <CredentialContent
+                          item={item}
+                          enabled={data.credential_agent_enabled}
+                          onDetails={() => open(item)}
+                          onTraffic={(id) => setTrafficTarget({ item, id })}
+                        />
                         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                           <span>来源证据</span>
-                          <p className="whitespace-pre-wrap break-all">{item.evidence}</p>
+                          <p className="whitespace-pre-wrap break-all">{intelligencePreview(item.evidence, 220)}</p>
+                          {Array.from(item.evidence).length > 220 ? (
+                            <button type="button" className="text-left underline" onClick={() => open(item)}>
+                              详情查看完整证据
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     </TableCell>
@@ -401,9 +409,35 @@ export function IntelligencePanel({
                   复制
                 </Button>
               </div>
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
-                {prettyContent(selected.content)}
-              </pre>
+              <CredentialContent
+                item={selected}
+                detail
+                enabled={data?.credential_agent_enabled}
+                onTraffic={(id) => setTrafficTarget({ item: selected, id })}
+              />
+              {selected.kind === "credential" && !selected.inherited && data?.credential_agent_enabled ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    retrying || selected.credentials?.state === "processing" || selected.credentials?.state === "queued"
+                  }
+                  onClick={async () => {
+                    setRetrying(true);
+                    try {
+                      await api.retryCredentials(selected.task_id, selected.id);
+                      setRefresh((n) => n + 1);
+                      toast.success("已加入凭据处理队列");
+                    } catch (e) {
+                      toast.error((e as Error).message);
+                    } finally {
+                      setRetrying(false);
+                    }
+                  }}
+                >
+                  重新处理凭据
+                </Button>
+              ) : null}
               <p className="text-sm">来源证据</p>
               <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
                 {selected.evidence}
@@ -422,6 +456,13 @@ export function IntelligencePanel({
           ) : null}
         </DialogContent>
       </Dialog>
+      <CredentialTrafficViewer
+        scope={scope}
+        scopeId={scopeId}
+        item={trafficTarget?.item ?? null}
+        trafficId={trafficTarget?.id ?? null}
+        onClose={() => setTrafficTarget(null)}
+      />
     </div>
   );
 }

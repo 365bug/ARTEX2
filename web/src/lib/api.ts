@@ -28,6 +28,7 @@ import type {
   ConvTokenSummary,
   CoverageAssetRefs,
   CoverageGraphData,
+  CredentialTrafficDetail,
   DailyTokenBucket,
   DeleteTaskOptions,
   DeleteTaskResult,
@@ -922,6 +923,12 @@ export const api = {
     get<TaskIntelligence>(`/${scope}/${id}/intelligence/${intelligenceId}`),
   updateIntelligence: (taskId: number, intelligenceId: number, status: string) =>
     patch<{ updated: boolean }>(`/tasks/${taskId}/intelligence/${intelligenceId}`, { status }),
+  retryCredentials: (taskId: number, intelligenceId: number) =>
+    post<{ queued: boolean }>(`/tasks/${taskId}/intelligence/${intelligenceId}/credentials/retry`),
+  credentialTraffic: (scope: "tasks" | "assets", scopeId: string, intelligenceId: number, trafficId: string) =>
+    get<CredentialTrafficDetail>(
+      `/${scope}/${scopeId}/intelligence/${intelligenceId}/traffic/${encodeURIComponent(trafficId)}`,
+    ),
   settings: () => get<Settings>(`/settings`),
   basicAuthSettings: () => get<{ enabled: boolean; username: string; password_set: boolean }>("/settings/basic-auth"),
   setBasicAuthSettings: (settings: { enabled: boolean; username: string; password: string }) =>

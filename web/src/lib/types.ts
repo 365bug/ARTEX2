@@ -947,6 +947,8 @@ export interface TrafficHost {
 // ---- App settings (runtime toggles) ----
 export interface Settings {
   traffic_capture: boolean;
+  credential_agent_enabled: boolean;
+  credential_traffic_binding: boolean;
   task_intelligence_enabled: boolean; // 默认关闭；关闭不注入情报工具或提示
   agent_traffic_binding: boolean; // Agent 自动绑定流量证据，默认关闭；不影响人工绑定
   llm_record: boolean; // LLM 录制开关（默认关）；关闭时不记录任何 LLM 调用
@@ -1744,7 +1746,46 @@ export interface FindingCaseReviewRun {
 }
 
 export type IntelligenceKind = "credential" | "lead" | "sensitive_data";
+export interface CredentialAccount {
+  label?: string;
+  username?: string;
+  password?: string;
+  token?: string;
+  cookie?: string;
+  endpoint?: string;
+  protocol?: string;
+}
+export interface CredentialTraffic {
+  id: string;
+  url: string;
+  method: string;
+  status: number;
+  side: string;
+  excerpt: string;
+  accounts: number[];
+}
+export interface CredentialAnalysis {
+  state: "queued" | "processing" | "ready" | "error";
+  method?: "rules" | "agent";
+  accounts: CredentialAccount[] | null;
+  traffic: CredentialTraffic[] | null;
+  traffic_state: string;
+  traffic_note?: string;
+  note?: string;
+  error?: string;
+  model?: string;
+  input_tokens: number;
+  output_tokens: number;
+  processed_at?: string;
+}
+export interface CredentialTrafficDetail {
+  reference: CredentialTraffic;
+  req?: string;
+  resp?: string;
+  unavailable: boolean;
+}
 export interface TaskIntelligence {
+  credentials?: CredentialAnalysis;
   source_session?: string;
   id: number;
   task_id: number;
@@ -1762,6 +1803,8 @@ export interface TaskIntelligence {
   inherited: boolean;
 }
 export interface IntelligencePage {
+  credential_agent_enabled: boolean;
+  credential_traffic_binding: boolean;
   items: TaskIntelligence[];
   total: number;
   counts: Record<IntelligenceKind, number>;
