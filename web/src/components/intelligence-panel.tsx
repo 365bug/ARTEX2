@@ -7,6 +7,7 @@ import Link from "next/link";
 import { CopyIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { StatusBadge, ToneDot } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { statusMeta } from "@/lib/status";
 import type { IntelligenceKind, IntelligencePage, TaskIntelligence } from "@/lib/types";
 
 const KINDS: { value: IntelligenceKind; label: string }[] = [
@@ -146,6 +148,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
               </TabsTrigger>
               {KINDS.map((item) => (
                 <TabsTrigger key={item.value} value={item.value}>
+                  <ToneDot tone={statusMeta("intelligence", item.value).tone} />
                   {item.label} {data?.counts[item.value] ?? 0}
                 </TabsTrigger>
               ))}
@@ -197,7 +200,16 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
           {!data && !error ? (
             <Skeleton className="h-40 w-full" />
           ) : data?.items.length ? (
-            <Table>
+            <Table className="min-w-[68rem] table-fixed">
+              <colgroup>
+                <col className="w-[20%]" />
+                <col className="w-[35%]" />
+                <col className="w-[8%]" />
+                <col className="w-[12%]" />
+                <col className="w-[6%]" />
+                <col className="w-[12%]" />
+                <col className="w-[7%]" />
+              </colgroup>
               <TableHeader>
                 <TableRow>
                   <TableHead>类别 / 标题</TableHead>
@@ -212,14 +224,14 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
               <TableBody>
                 {data.items.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell className="max-w-80">
-                      <div className="flex flex-col items-start gap-1">
-                        <Badge variant="secondary">{KINDS.find((k) => k.value === item.kind)?.label}</Badge>
-                        <span className="break-words">{item.title}</span>
+                    <TableCell className="align-top whitespace-normal">
+                      <div className="flex min-w-0 flex-col items-start gap-1">
+                        <StatusBadge domain="intelligence" value={item.kind} />
+                        <span className="max-w-full [overflow-wrap:anywhere]">{item.title}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="min-w-64 max-w-md align-top">
-                      <div className="flex flex-col gap-2">
+                    <TableCell className="align-top whitespace-normal">
+                      <div className="flex min-w-0 flex-col gap-2">
                         <pre className="whitespace-pre-wrap break-all font-mono text-xs">
                           {prettyContent(item.content)}
                         </pre>
@@ -229,7 +241,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
                       <div className="flex flex-col items-start gap-1">
                         <Badge variant="outline">{STATUS[item.kind][item.status] ?? item.status}</Badge>
                         <span className="text-xs text-muted-foreground">
@@ -237,7 +249,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
                       <div className="flex flex-col gap-1">
                         <Link href={`/function/tasks/detail?id=${item.task_id}&tab=intelligence`} className="underline">
                           任务 #{item.task_id}
@@ -249,11 +261,11 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
                         {item.inherited ? <Badge variant="outline">继承 · 只读</Badge> : null}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
                       {item.asset_ids.length ? item.asset_ids.map((id) => `#${id}`).join("、") : "未关联"}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">{time(item.created_at)}</TableCell>
-                    <TableCell>
+                    <TableCell className="align-top whitespace-normal text-xs">{time(item.created_at)}</TableCell>
+                    <TableCell className="align-top whitespace-normal [overflow-wrap:anywhere]">
                       <Button size="sm" variant="outline" onClick={() => open(item)}>
                         详情
                       </Button>
@@ -308,7 +320,7 @@ export function IntelligencePanel({ scope, scopeId }: { scope: "tasks" | "assets
           {selected ? (
             <div className="flex min-w-0 flex-col gap-4">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{KINDS.find((k) => k.value === selected.kind)?.label}</Badge>
+                <StatusBadge domain="intelligence" value={selected.kind} />
                 <Badge variant="outline">{selected.confidence === "observed" ? "直接观察" : "推测"}</Badge>
                 <span className="text-xs text-muted-foreground">
                   任务 #{selected.task_id}
