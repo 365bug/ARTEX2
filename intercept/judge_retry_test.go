@@ -31,6 +31,28 @@ func retryTestInterceptor(t *testing.T, settings map[string]string) *Interceptor
 	return New(&db.DB{DB: d})
 }
 
+func TestJudgeFailActionDefaultsAndOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, want string
+	}{
+		{"missing", "", "ask"},
+		{"invalid", "invalid", "ask"},
+		{"saved_allow", "allow", "allow"},
+		{"saved_ask", "ask", "ask"},
+		{"saved_deny", "deny", "deny"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := map[string]string{}
+			if tc.value != "" {
+				settings[settingJudgeFailAction] = tc.value
+			}
+			if got := retryTestInterceptor(t, settings).GetJudgeConfig().FailAction; got != tc.want {
+				t.Fatalf("fail action=%s want=%s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestJudgeRetryConfigDefaultsAndBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -63,14 +85,19 @@ func TestJudgeRetriesBeforeApplyingFailurePolicy(t *testing.T) {
 		{"recover", "deny", "allow", 2, 3, "allow", false},
 		{"valid_deny_is_final", "allow", "deny", 0, 1, "deny", false},
 		{"valid_ask_is_final", "allow", "ask", 0, 1, "ask", false},
+		{"exhaust_default", "", "allow", 9, 3, "ask", true},
 		{"exhaust_allow", "allow", "allow", 9, 3, "allow", true},
 		{"exhaust_ask", "ask", "allow", 9, 3, "ask", true},
 		{"exhaust_deny", "deny", "allow", 9, 3, "deny", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			i := retryTestInterceptor(t, map[string]string{
-				settingJudgeEnabled: "true", settingJudgeRetryCount: "2", settingJudgeRetryIntervalMS: "0", settingJudgeFailAction: tc.failAction,
-			})
+			settings := map[string]string{
+				settingJudgeEnabled: "true", settingJudgeRetryCount: "2", settingJudgeRetryIntervalMS: "0",
+			}
+			if tc.failAction != "" {
+				settings[settingJudgeFailAction] = tc.failAction
+			}
+			i := retryTestInterceptor(t, settings)
 			calls := 0
 			var first ReviewInput
 			i.SetReviewer(func(ctx context.Context, id int64, prompt string, input ReviewInput) (Decision, error) {
