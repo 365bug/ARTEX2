@@ -40,12 +40,14 @@ interface TemplateDraft {
   name: string;
   description: string;
   goal: string;
+  remark: string;
   categoryID: number | null;
   interceptRules: AssetInterceptRuleInput[];
+  workerCount: string; // 输入框用字符串;空/0=用全局默认
 }
 
 // TemplateSeed 是「另存为模板」时从创建表单带入的初值。
-type TemplateSeed = Pick<TemplateDraft, "description" | "goal" | "categoryID" | "interceptRules">;
+type TemplateSeed = Pick<TemplateDraft, "description" | "goal" | "remark" | "categoryID" | "interceptRules" | "workerCount">;
 
 interface TaskTemplateManagerProps {
   open: boolean;
@@ -61,8 +63,10 @@ const emptyDraft = (): TemplateDraft => ({
   name: "",
   description: "",
   goal: "",
+  remark: "",
   categoryID: null,
   interceptRules: [],
+  workerCount: "",
 });
 
 function templateDraft(template: TaskTemplate): TemplateDraft {
@@ -70,8 +74,10 @@ function templateDraft(template: TaskTemplate): TemplateDraft {
     name: template.name,
     description: template.description,
     goal: template.goal,
+    remark: template.remark ?? "",
     categoryID: template.category_id ?? null,
     interceptRules: template.intercept_rules ?? [],
+    workerCount: template.worker_count ? String(template.worker_count) : "",
   };
 }
 
@@ -108,8 +114,10 @@ function TaskTemplateManager({
           name: "",
           description: seed.description,
           goal: seed.goal,
+          remark: seed.remark,
           categoryID: seed.categoryID,
           interceptRules: seed.interceptRules,
+          workerCount: seed.workerCount,
         });
       } else if (templates[0]) {
         setSelectedID(templates[0].id);
@@ -132,7 +140,7 @@ function TaskTemplateManager({
     setDraft(emptyDraft());
   };
 
-  const updateDraft = (field: "name" | "description" | "goal", value: string) => {
+  const updateDraft = (field: "name" | "description" | "goal" | "remark" | "workerCount", value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
   };
 
@@ -145,7 +153,9 @@ function TaskTemplateManager({
       name: draft.name.trim(),
       description: draft.description.trim(),
       goal: draft.goal.trim(),
+      remark: draft.remark.trim(),
       category_id: draft.categoryID,
+      worker_count: Math.min(50, Math.max(0, Math.floor(Number(draft.workerCount) || 0))),
       intercept_rules: draft.interceptRules
         .map((r) => ({ ...r, pattern: r.pattern.trim() }))
         .filter((r) => r.pattern !== ""),
@@ -232,6 +242,9 @@ function TaskTemplateManager({
                     >
                       <span className="block truncate font-medium text-sm">{template.name}</span>
                       <span className="block truncate text-muted-foreground text-xs">{template.description}</span>
+                      {template.remark ? (
+                        <span className="block truncate text-muted-foreground/80 text-xs">备注：{template.remark}</span>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -268,6 +281,30 @@ function TaskTemplateManager({
                     placeholder="任务需要达成的目标"
                     onChange={(event) => updateDraft("goal", event.target.value)}
                   />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="task-template-remark">备注（可选）</FieldLabel>
+                  <Textarea
+                    id="task-template-remark"
+                    className="min-h-20"
+                    value={draft.remark}
+                    placeholder="预设备注，应用模板时写入新任务"
+                    onChange={(event) => updateDraft("remark", event.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="task-template-worker-count">Worker 运行数量（可选）</FieldLabel>
+                  <Input
+                    id="task-template-worker-count"
+                    type="number"
+                    min={0}
+                    max={50}
+                    className="w-40"
+                    placeholder="留空 = 全局默认"
+                    value={draft.workerCount}
+                    onChange={(event) => updateDraft("workerCount", event.target.value)}
+                  />
+                  <FieldDescription>应用模板时预填本任务 Worker 数；留空或 0 = 用全局默认。</FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="task-template-category">任务分类</FieldLabel>
@@ -347,8 +384,10 @@ function TaskTemplateManager({
 interface TaskTemplateControlsProps {
   description: string;
   goal: string;
+  remark?: string;
   categoryID?: number;
   interceptRules?: AssetInterceptRuleInput[];
+  workerCount?: string;
   selectedTemplateID: number | null;
   onSelectedTemplateIDChange: (id: number | null) => void;
   onApply: (template: TaskTemplate) => void;
@@ -358,8 +397,10 @@ interface TaskTemplateControlsProps {
 export function TaskTemplateControls({
   description,
   goal,
+  remark = "",
   categoryID,
   interceptRules,
+  workerCount = "",
   selectedTemplateID,
   onSelectedTemplateIDChange,
   onApply,
@@ -455,8 +496,10 @@ export function TaskTemplateControls({
                 openManager({
                   description,
                   goal,
+                  remark,
                   categoryID: categoryID ?? null,
                   interceptRules: interceptRules ?? [],
+                  workerCount,
                 })
               }
             >
