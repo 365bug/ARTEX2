@@ -119,8 +119,11 @@ func normalizeTaskTemplateInput(in TaskTemplateInput) (TaskTemplateInput, string
 		return in, "", fmt.Errorf("%w: goal exceeds %d characters", ErrTaskTemplateInvalid, MaxTaskTemplateTextRunes)
 	}
 	in.Remark = strings.TrimSpace(in.Remark)
-	if utf8.RuneCountInString(in.Remark) > MaxTaskTemplateTextRunes {
-		return in, "", fmt.Errorf("%w: remark exceeds %d characters", ErrTaskTemplateInvalid, MaxTaskTemplateTextRunes)
+	// Align with task remarks (server/remarks.go maxRemarkRunes=2000) so applying a
+	// template cannot produce a create-task payload that the task API rejects.
+	const maxTemplateRemarkRunes = 2000
+	if utf8.RuneCountInString(in.Remark) > maxTemplateRemarkRunes {
+		return in, "", fmt.Errorf("%w: remark exceeds %d characters", ErrTaskTemplateInvalid, maxTemplateRemarkRunes)
 	}
 	in.WorkerCount = normalizeWorkerCount(in.WorkerCount)
 	return in, taskTemplateNKey(in.Name), nil
@@ -165,8 +168,9 @@ func normalizeTaskTemplatePatch(patch TaskTemplatePatch) (TaskTemplatePatch, *st
 	}
 	if patch.Remark != nil {
 		remark := strings.TrimSpace(*patch.Remark)
-		if utf8.RuneCountInString(remark) > MaxTaskTemplateTextRunes {
-			return patch, nil, fmt.Errorf("%w: remark exceeds %d characters", ErrTaskTemplateInvalid, MaxTaskTemplateTextRunes)
+		const maxTemplateRemarkRunes = 2000
+		if utf8.RuneCountInString(remark) > maxTemplateRemarkRunes {
+			return patch, nil, fmt.Errorf("%w: remark exceeds %d characters", ErrTaskTemplateInvalid, maxTemplateRemarkRunes)
 		}
 		patch.Remark = &remark
 	}
