@@ -27,6 +27,9 @@ type taskAgentBundle struct {
 	pl             *agent.Planner
 	wk             *agent.Worker
 	main           *agent.MainAgent
+	// workersByProfile caches Work Agents pinned to a specific LLM profile for
+	// multi-model pools (issue #41). Key = llm_profiles.id.
+	workersByProfile map[int64]*agent.Worker
 }
 
 type llmAuditProfile struct {
@@ -51,6 +54,11 @@ type taskLLMRuntime struct {
 	s        *Server
 	taskID   string
 	agentKey string
+	// pinProfileID, when non-zero, forces every LLM call onto that profile and
+	// skips agent-binding / task-chain / global resolution. Used by multi-model
+	// Worker pools so each session (work#N) stays on its assigned model. Quota
+	// errors do NOT advance the task failover chain (sel.profileID stays 0).
+	pinProfileID int64
 }
 
 type taskLLMError struct {
@@ -122,6 +130,15 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 	r.s.syncTaskLLMState(pt)
 	t, _ := r.s.m.Task(r.taskID)
 	sel := taskLLMSelection{task: t, revision: pt.LLMChainRevision}
+	if r.pinProfileID != 0 {
+		prov, cfg, ok := r.s.providerForProfile(r.pinProfileID)
+		if !ok {
+			return sel, fmt.Errorf("pinned LLM profile #%d is missing or invalid", r.pinProfileID)
+		}
+		// profileID left 0 so streamTaskLLM/completeTaskLLM never mutate the task chain.
+		sel.provider, sel.retry = r.s.poolForBinding(r.pinProfileID, prov, cfg), cfg.Retry
+		return sel, nil
+	}
 	if prov, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
 		sel.provider, sel.retry = prov, cfg.Retry
 		return sel, nil
@@ -152,6 +169,12 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 // the caller. If failover switches profiles, the change takes effect on the next
 // agent run (a fresh Session is built per run in captureRun).
 func (r *taskLLMRuntime) activeCfg() (agent.Config, bool) {
+	if r.pinProfileID != 0 {
+		if _, cfg, ok := r.s.providerForProfile(r.pinProfileID); ok {
+			return cfg, true
+		}
+		return agent.Config{}, false
+	}
 	taskNum, err := parseTaskID(r.taskID)
 	if err != nil {
 		return agent.Config{}, false
@@ -454,6 +477,12 @@ func isRetryableStreamError(err error) bool {
 // CompactionWindow mirrors current()'s precedence so the context window always
 // matches the provider the role will actually stream on.
 func (r *taskLLMRuntime) CompactionWindow() int {
+	if r.pinProfileID != 0 {
+		if _, cfg, ok := r.s.providerForProfile(r.pinProfileID); ok {
+			return cfg.CompactionWindow()
+		}
+		return (agent.Config{}).CompactionWindow()
+	}
 	if _, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
 		return cfg.CompactionWindow()
 	}
@@ -560,17 +589,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	workerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker"}
 	mainRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "mainagent"}
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
-	window := workerRuntime.CompactionWindow()
-	wk := agent.NewWorker(workerRuntime, "task-router", s.m.dir, tx, window, s.agentMaxTurns("worker"))
-	wk.SetFindingRecorder(s.evidenceStore())
-	wk.SetCompactionWindowResolver(workerRuntime.CompactionWindow)
-	wk.SetNonStreaming(workerRuntime.nonStreaming) // 按任务当前激活 profile 的流式开关(每轮读)
-	wk.SetMaxTokens(workerRuntime.maxTokens)       // 同上,输出上限也跟随当前激活 profile
-	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)     // 实验功能:noa 上下文压缩(平台级开关,每 run 读)
-	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
-	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
-	wk.SetWebSearch(s.webSearchFor("worker"))
-	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开)
+	wk := s.newTaskWorker(workerRuntime, tx)
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.evidenceStore())
 	pl.SetCompactionWindowResolver(plannerRuntime.CompactionWindow)
@@ -598,9 +617,59 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	bundle := &taskAgentBundle{
 		runtime: goalRuntime, plannerRuntime: plannerRuntime, workerRuntime: workerRuntime,
 		mainRuntime: mainRuntime, pl: pl, wk: wk, main: main,
+		workersByProfile: map[int64]*agent.Worker{},
 	}
 	s.taskAgents[t.ID] = bundle
 	return bundle
+}
+
+
+// newTaskWorker builds a Work Agent on the given runtime (shared wiring for the
+// unbound task worker and per-profile pinned workers).
+func (s *Server) newTaskWorker(runtime *taskLLMRuntime, tx *transcript.Store) *agent.Worker {
+	wk := agent.NewWorker(runtime, "task-router", s.m.dir, tx, runtime.CompactionWindow(), s.agentMaxTurns("worker"))
+	wk.SetFindingRecorder(s.evidenceStore())
+	wk.SetCompactionWindowResolver(runtime.CompactionWindow)
+	wk.SetNonStreaming(runtime.nonStreaming)
+	wk.SetMaxTokens(runtime.maxTokens)
+	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)
+	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
+	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	wk.SetWebSearch(s.webSearchFor("worker"))
+	wk.SetConstraintInject(s.constraintInjectWorker)
+	return wk
+}
+
+// workerForTask returns the Work Agent for one Engine spawn slot.
+// profileID 0 → unbound task-router worker (requires taskRuntimeAvailable).
+// Non-zero → worker pinned to that LLM profile (must build; ignores task-chain exhaustion).
+func (s *Server) workerForTask(t *Task, profileID int64) *agent.Worker {
+	if t == nil {
+		return nil
+	}
+	if profileID == 0 {
+		if !s.taskRuntimeAvailable(t, "worker") {
+			return nil
+		}
+		return s.agentsForTask(t).wk
+	}
+	if _, _, ok := s.providerForProfile(profileID); !ok {
+		return nil
+	}
+	bundle := s.agentsForTask(t)
+	s.taskAgentMu.Lock()
+	defer s.taskAgentMu.Unlock()
+	if bundle.workersByProfile == nil {
+		bundle.workersByProfile = map[int64]*agent.Worker{}
+	}
+	if w := bundle.workersByProfile[profileID]; w != nil {
+		return w
+	}
+	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
+	runtime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker", pinProfileID: profileID}
+	w := s.newTaskWorker(runtime, tx)
+	bundle.workersByProfile[profileID] = w
+	return w
 }
 
 func (s *Server) syncTaskLLMState(pt *db.Task) {

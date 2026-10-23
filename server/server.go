@@ -177,6 +177,11 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		b := s.agentsForTask(t)
 		return b.pl, b.wk
 	})
+	// Multi-model Worker pools (#41): each spawn slot may pin a Work Agent to a
+	// specific LLM profile. profileID 0 keeps the unbound task-router worker.
+	s.engine.SetWorkerResolver(func(t *Task, profileID int64) *agent.Worker {
+		return s.workerForTask(t, profileID)
+	})
 	// Global readiness (Ready()/llm_configured): a global active LLM provider is
 	// installed. Task-level runnability is separate (ReadyFor → the resolver above).
 	s.engine.SetReadiness(func() bool {
@@ -3432,6 +3437,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"global_proxy":              s.m.GlobalProxy(),           // 全局出口代理(http/https/socks5)，所有目标流量走它，空=直连
 		"python_interpreter":        strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
 		"workers":                   s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
+		"worker_pools":              workerPoolsPayload(s.m),     // 多模型 Worker 池；空=走 workers 遗留模式
 		"task_concurrency_enabled":  concOn,                      // 任务并发上限开关(默认关)
 		"task_concurrency_limit":    concLimit,                   // 同时运行任务上限(开启后默认5)
 		// LLM 轮询(故障转移)。默认关；开启后走全局激活配置的 agent 在当前配置不可用时
@@ -3450,6 +3456,18 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
 	}
+}
+
+
+// workerPoolsPayload always returns a non-nil slice for JSON (empty = legacy mode).
+func workerPoolsPayload(m *Manager) []WorkerPoolConfig {
+	if m == nil {
+		return []WorkerPoolConfig{}
+	}
+	if pools := m.WorkerPools(); pools != nil {
+		return pools
+	}
+	return []WorkerPoolConfig{}
 }
 
 // notifyPublicBaseURL 读推送回链用的外部地址。
@@ -3506,7 +3524,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		WebSearchProxy   *string `json:"web_search_proxy"`   // 独立出口代理(http/https/socks5)；null=不改，""=清空
 		GlobalProxy      *string `json:"global_proxy"`       // 全局出口代理(http/https/socks5)；null=不改，""=清空(直连)
 		PythonInterp     *string `json:"python_interpreter"` // 自定义脚本工具的 python 解释器路径
-		Workers          *int    `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
+		Workers          *int               `json:"workers"`      // 并发工作 agent 数(>0)；对之后启动的任务生效
+		WorkerPools      *[]WorkerPoolConfig `json:"worker_pools"` // 多模型池；null=不改，[]=清空回遗留模式
 		// 任务并发上限:同时「运行中」的任务数上限。关闭=不限;开启后新建任务超限则排队,有空位自动启动。
 		ConcurrencyEnabled *bool `json:"task_concurrency_enabled"`
 		ConcurrencyLimit   *int  `json:"task_concurrency_limit"`
@@ -3583,6 +3602,22 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.m.SetWorkers(*req.Workers); err != nil {
 			writeErr(w, 400, err.Error())
 			return
+		}
+	}
+	if req.WorkerPools != nil {
+		if err := s.m.SetWorkerPools(*req.WorkerPools); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		// 有池配置时把 workers 同步成合计,方便 UI/遗留读数与真实并发一致。
+		if pools := *req.WorkerPools; len(pools) > 0 {
+			total := 0
+			for _, p := range pools {
+				total += p.Workers
+			}
+			if total > 0 {
+				_ = s.m.SetWorkers(total)
+			}
 		}
 	}
 	if req.ConcurrencyEnabled != nil || req.ConcurrencyLimit != nil {
