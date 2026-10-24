@@ -1182,12 +1182,10 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const created: Task = {
       id,
       name: String(b.name ?? ""),
-      remark: typeof b.remark === "string" ? b.remark.trim() : "",
       category_id: category?.id,
       category_name: category?.name,
       description: String(b.description ?? "新任务"),
       goal: String(b.goal ?? ""),
-      worker_count: typeof b.worker_count === "number" ? Math.min(50, Math.max(0, Math.floor(b.worker_count))) : 0,
       status: "created",
       created_at: now.toISOString(),
       created_unix: Math.floor(now.getTime() / 1000),
@@ -1317,10 +1315,6 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       name,
       description,
       goal,
-      remark: typeof b.remark === "string" ? b.remark.trim() : "",
-      category_id: typeof b.category_id === "number" ? b.category_id : null,
-      intercept_rules: Array.isArray(b.intercept_rules) ? b.intercept_rules : [],
-      worker_count: typeof b.worker_count === "number" ? Math.min(50, Math.max(0, Math.floor(b.worker_count))) : 0,
       created_at: now,
       updated_at: now,
     };
@@ -1344,10 +1338,6 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     template.name = name;
     template.description = description;
     template.goal = goal;
-    if (typeof b.remark === "string") template.remark = b.remark.trim();
-    if ("category_id" in b) template.category_id = typeof b.category_id === "number" ? b.category_id : null;
-    if (Array.isArray(b.intercept_rules)) template.intercept_rules = b.intercept_rules;
-    if (typeof b.worker_count === "number") template.worker_count = Math.min(50, Math.max(0, Math.floor(b.worker_count)));
     template.updated_at = new Date().toISOString();
     mockTaskTemplates.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id);
     return template;
