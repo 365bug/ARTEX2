@@ -464,8 +464,18 @@ export function TaskTemplateControls({
       return;
     }
     setTemplateInputValue(template.name);
-    const hasContent = description.trim() !== "" || goal.trim() !== "";
-    const changesContent = description !== template.description || goal !== template.goal;
+    const currentWorkerCount = parseWorkerCountInput(workerCount);
+    const templateWorkerCount = template.worker_count ?? 0;
+    const hasContent =
+      description.trim() !== "" ||
+      goal.trim() !== "" ||
+      remark.trim() !== "" ||
+      (currentWorkerCount == null ? workerCount.trim() !== "" : currentWorkerCount !== 0);
+    const changesContent =
+      description !== template.description ||
+      goal !== template.goal ||
+      remark !== (template.remark ?? "") ||
+      (currentWorkerCount == null ? workerCount.trim() !== "" : currentWorkerCount !== templateWorkerCount);
     if (hasContent && changesContent) {
       setPendingTemplate(template);
       return;
@@ -554,7 +564,9 @@ export function TaskTemplateControls({
             </ComboboxList>
           </ComboboxContent>
         </Combobox>
-        <FieldDescription>选择后会复制模板的描述、目标、分类与任务级规则，不与模板保持关联。</FieldDescription>
+        <FieldDescription>
+          选择后会复制模板的描述、目标、备注、Worker 数量、分类与任务级规则，不与模板保持关联。
+        </FieldDescription>
       </Field>
 
       <AlertDialog
@@ -568,7 +580,7 @@ export function TaskTemplateControls({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>使用模板「{pendingTemplate?.name}」？</AlertDialogTitle>
-            <AlertDialogDescription>当前已填写的描述和目标将被模板内容覆盖。</AlertDialogDescription>
+            <AlertDialogDescription>当前已填写的描述、目标、备注和 Worker 数量将被模板内容覆盖。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
