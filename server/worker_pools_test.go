@@ -14,6 +14,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/norma/llm"
 )
 
 func TestExpandWorkerSlotsLegacy(t *testing.T) {
@@ -210,6 +211,51 @@ func TestPinnedRuntimeMissingProfileDoesNotFallback(t *testing.T) {
 	}
 }
 
+func TestPinnedRuntimeQuotaDoesNotAdvanceTaskFailover(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	defer m.Close()
+	task, err := m.CreateTask("pinned quota", "test", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+	profileID, err := m.pg.SaveProfile(&db.LLMProfile{Name: "pinned-quota", Format: "openai", Model: "pinned", APIKey: "key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.pg.DeleteProfile(profileID)
+	if _, err := m.ReplaceTaskLLMProfiles(task.ID, []int64{profileID}, profileID); err != nil {
+		t.Fatal(err)
+	}
+	before, err := m.pg.GetTask(taskIDInt(t, task.ID))
+	if err != nil || before == nil || before.ActiveLLMProfileID == nil {
+		t.Fatalf("load task failover state: task=%+v err=%v", before, err)
+	}
+	provider := &scriptedLLMProvider{err: errors.New("insufficient_quota")}
+	s := &Server{m: m, provByProfile: map[int64]*provEntry{profileID: {prov: provider, cfg: agent.Config{}}}}
+	id := profileID
+	runtime := &taskLLMRuntime{s: s, taskID: task.ID, agentKey: "worker", pinProfileID: &id}
+	if _, _, _, err := runtime.Complete(context.Background(), llm.CompletionRequest{}); err == nil {
+		t.Fatal("pinned quota error unexpectedly succeeded")
+	}
+	after, err := m.pg.GetTask(taskIDInt(t, task.ID))
+	if err != nil || after == nil || after.LLMChainRevision != before.LLMChainRevision || after.ActiveLLMProfileID == nil || *after.ActiveLLMProfileID != *before.ActiveLLMProfileID {
+		t.Fatalf("pinned quota changed task failover state: before=%+v after=%+v err=%v", before, after, err)
+	}
+}
+
+func taskIDInt(t *testing.T, id string) int64 {
+	t.Helper()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 func TestPinnedWorkerLoopDoesNotConsultTaskRouterAndReportsFailureOnce(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
@@ -253,11 +299,95 @@ func TestPinnedWorkerLoopDoesNotConsultTaskRouterAndReportsFailureOnce(t *testin
 	}
 	var failures int
 	for _, activity := range activities {
-		if activity.Worker == "work#4" && activity.IsError {
+		if activity.Worker == "system" && activity.IsError {
 			failures++
 		}
 	}
 	if failures != 1 {
 		t.Fatalf("pinned failure activities=%d, want one throttled entry: %+v", failures, activities)
+	}
+}
+
+func TestPinnedWorkerAvailabilityRecoveryUsesSystemSession(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	defer m.Close()
+	task, err := m.CreateTask("pinned availability", "test", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+	e := NewEngine(m)
+	slot := WorkerSlot{Name: "work#4", ProfileID: 12}
+	e.reportSlotAvailability(task, slot, errors.New("profile unavailable"))
+	e.reportSlotAvailability(task, slot, nil)
+	activities, _, err := task.Store.ActivityList(nil, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failure, recovery int
+	for _, activity := range activities {
+		if activity.Worker != "system" {
+			continue
+		}
+		if activity.IsError && strings.Contains(activity.Summary, "work#4") && strings.Contains(activity.Summary, "#12") {
+			failure++
+		}
+		if !activity.IsError && strings.Contains(activity.Summary, "work#4") && strings.Contains(activity.Summary, "#12") {
+			recovery++
+		}
+	}
+	if failure != 1 || recovery != 1 {
+		t.Fatalf("system availability activities failure=%d recovery=%d: %+v", failure, recovery, activities)
+	}
+}
+
+func TestDetachedIntentPinnedOwnerUsesPinnedResolver(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	defer m.Close()
+	task, err := m.CreateTask("detached pinned owner", "test", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+	intentID, err := task.Store.AddIntent(map[string]any{"text": "continue"}, 0, nil, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := task.Store.ClaimIntent(intentID, "work#4"); err != nil || !ok {
+		t.Fatalf("claim intent: ok=%v err=%v", ok, err)
+	}
+	if changed, err := task.Store.CompareAndSetIntentState(intentID, "running", "paused"); err != nil || !changed {
+		t.Fatalf("pause intent: changed=%v err=%v", changed, err)
+	}
+	e := NewEngine(m)
+	e.slotPlans.Store(task.ID, map[string]int64{"work#4": 12})
+	var pinnedCalls, snapshotCalls atomic.Int32
+	e.SetWorkerResolver(func(_ *Task, slot WorkerSlot) (*agent.Worker, error) {
+		pinnedCalls.Add(1)
+		if slot.Name != "work#4" || slot.ProfileID != 12 {
+			t.Fatalf("unexpected pinned slot: %+v", slot)
+		}
+		return nil, errors.New("profile unavailable")
+	})
+	e.SetAuthoritativeAgentResolver(func(*Task) (*agent.Planner, *agent.Worker) {
+		snapshotCalls.Add(1)
+		return nil, nil
+	})
+	err = e.runDetachedIntent(context.Background(), task, intentID, "request", "human", "agent")
+	if err == nil || !strings.Contains(err.Error(), "LLM 配置 #12 不可用") {
+		t.Fatalf("runDetachedIntent err=%v", err)
+	}
+	if pinnedCalls.Load() != 1 || snapshotCalls.Load() != 0 {
+		t.Fatalf("pinned calls=%d snapshot calls=%d", pinnedCalls.Load(), snapshotCalls.Load())
+	}
+	node, err := task.Store.GetNode(intentID)
+	if err != nil || node == nil || node.State != "paused" {
+		t.Fatalf("intent changed after unavailable resolver: node=%+v err=%v", node, err)
 	}
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -444,9 +445,10 @@ func (m *Manager) WorkerPools() []WorkerPool {
 	return pools
 }
 
-// SetWorkerPools validates profile references at save time and synchronizes the
-// legacy workers setting with the pool total. An empty slice restores legacy mode.
-func (m *Manager) SetWorkerPools(pools []WorkerPool) error {
+// SetWorkerPools validates profile references at save time and atomically
+// synchronizes the legacy workers setting with the pool total. An empty slice
+// restores legacy mode; an optional legacy count is used when clearing pools.
+func (m *Manager) SetWorkerPools(pools []WorkerPool, legacyWorkers ...int) error {
 	if pools == nil {
 		pools = []WorkerPool{}
 	}
@@ -468,17 +470,22 @@ func (m *Manager) SetWorkerPools(pools []WorkerPool) error {
 	if err != nil {
 		return err
 	}
-	if err := m.pg.SetSetting(settingWorkerPools, string(b)); err != nil {
-		return err
-	}
+	workerCount := m.Workers()
 	if len(pools) > 0 {
-		total := 0
+		workerCount = 0
 		for _, pool := range pools {
-			total += pool.Workers
+			workerCount += pool.Workers
 		}
-		return m.pg.SetSetting(settingWorkers, strconv.Itoa(total))
+	} else if len(legacyWorkers) > 0 {
+		if legacyWorkers[0] <= 0 {
+			return fmt.Errorf("workers 必须 >0")
+		}
+		workerCount = legacyWorkers[0]
 	}
-	return nil
+	return m.pg.SetSettingsAtomic(context.Background(), map[string]string{
+		settingWorkerPools: string(b),
+		settingWorkers:     strconv.Itoa(workerCount),
+	})
 }
 
 // SetWorkers persists the concurrent work-agent count. Values <=0 are rejected.

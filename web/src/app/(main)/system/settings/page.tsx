@@ -40,6 +40,7 @@ export default function SystemSettingsPage() {
   const [savingGlobalProxy, setSavingGlobalProxy] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
+  const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [savingKey, setSavingKey] = React.useState(false);
   const [pyInterp, setPyInterp] = React.useState("");
@@ -69,13 +70,17 @@ export default function SystemSettingsPage() {
     setGlobalProxyInput(s.global_proxy ?? "");
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
-    setWorkerPools(s.worker_pools);
+    setWorkerPools(s.worker_pools ?? []);
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
   }, []);
 
   const saveWorkers = () => {
+    if (!settingsLoaded) {
+      toast.error("设置加载失败，请刷新后再保存 Worker 配置");
+      return;
+    }
     const n = Number(workers);
     if (workerPools.length > 0) {
       const total = workerPools.reduce((sum, pool) => sum + Number(pool.workers), 0);
@@ -150,8 +155,14 @@ export default function SystemSettingsPage() {
   React.useEffect(() => {
     api
       .settings()
-      .then(apply)
-      .catch(() => undefined)
+      .then((s) => {
+        apply(s);
+        setSettingsLoaded(true);
+      })
+      .catch(() => {
+        setSettingsLoaded(false);
+        toast.error("设置加载失败，Worker 配置已锁定，避免覆盖服务器上的模型池");
+      })
       .finally(() => setLoaded(true));
   }, [apply]);
 
@@ -804,7 +815,12 @@ export default function SystemSettingsPage() {
             <div className="flex flex-col gap-2 rounded-md border p-3">
               <div className="flex items-center justify-between">
                 <Label className="text-sm">多模型 Worker 池</Label>
-                <Button variant="outline" size="sm" onClick={addWorkerPool} disabled={!loaded || savingWorkers}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addWorkerPool}
+                  disabled={!loaded || !settingsLoaded || savingWorkers}
+                >
                   添加模型池
                 </Button>
               </div>
@@ -817,6 +833,7 @@ export default function SystemSettingsPage() {
                   <div className="flex items-center gap-2" key={`${pool.profile_id}-${index}`}>
                     <Select
                       value={pool.profile_id || undefined}
+                      disabled={!settingsLoaded || savingWorkers}
                       onValueChange={(value) =>
                         setWorkerPools((current) =>
                           current.map((item, itemIndex) =>
@@ -844,6 +861,7 @@ export default function SystemSettingsPage() {
                       min={1}
                       className="w-24 font-mono text-sm"
                       value={pool.workers}
+                      disabled={!settingsLoaded || savingWorkers}
                       onChange={(event) =>
                         setWorkerPools((current) =>
                           current.map((item, itemIndex) =>
@@ -855,6 +873,7 @@ export default function SystemSettingsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      disabled={!settingsLoaded || savingWorkers}
                       onClick={() => setWorkerPools((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     >
                       删除
@@ -875,16 +894,19 @@ export default function SystemSettingsPage() {
                 className="w-32 font-mono text-sm"
                 placeholder="3"
                 value={workers}
-                disabled={!loaded || savingWorkers || workerPools.length > 0}
+                disabled={!loaded || !settingsLoaded || savingWorkers || workerPools.length > 0}
                 onChange={(e) => setWorkers(e.target.value)}
               />
               {workerPools.length > 0 ? (
                 <span className="text-muted-foreground text-xs">已配置模型池时由各池数量决定并发。</span>
               ) : null}
-              <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
+              <Button onClick={saveWorkers} disabled={!loaded || !settingsLoaded || savingWorkers}>
                 保存
               </Button>
             </div>
+            {!settingsLoaded && loaded ? (
+              <p className="text-destructive text-xs">设置加载失败，Worker 配置已锁定；刷新成功后才能编辑或保存。</p>
+            ) : null}
           </CardContent>
         </Card>
 

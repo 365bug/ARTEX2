@@ -3593,15 +3593,13 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "workers 必须 >0")
 			return
 		}
-		if err := s.m.SetWorkerPools(*req.WorkerPools); err != nil {
+		legacyWorkers := []int(nil)
+		if req.Workers != nil {
+			legacyWorkers = []int{*req.Workers}
+		}
+		if err := s.m.SetWorkerPools(*req.WorkerPools, legacyWorkers...); err != nil {
 			writeErr(w, 400, err.Error())
 			return
-		}
-		if len(*req.WorkerPools) == 0 && req.Workers != nil {
-			if err := s.m.SetWorkers(*req.Workers); err != nil {
-				writeErr(w, 400, err.Error())
-				return
-			}
 		}
 	} else if req.Workers != nil {
 		// An omitted worker_pools field leaves the saved mode unchanged. If a

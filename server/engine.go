@@ -150,6 +150,7 @@ type Engine struct {
 	resolveAuthoritative bool
 	workerResolve        func(t *Task, slot WorkerSlot) (*agent.Worker, error)
 	slotState            sync.Map // task/slot -> slotAvailability
+	slotPlans            sync.Map // task -> map[slot name]profile ID; immutable for a run
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness func() bool
@@ -292,6 +293,7 @@ func (e *Engine) StopTask(taskID string) {
 	e.stamped.Delete(taskID)
 	e.inflight.Delete(taskID)
 	e.coordStarted.Delete(taskID)
+	e.slotPlans.Delete(taskID)
 	e.slotState.Range(func(key, _ any) bool {
 		keyText, ok := key.(string)
 		if ok && strings.HasPrefix(keyText, taskID+"/") {
@@ -741,7 +743,7 @@ func (e *Engine) reportSlotAvailability(t *Task, slot WorkerSlot, err error) {
 	if err == nil {
 		if loaded && !state.available {
 			e.slotState.Store(key, slotAvailability{available: true, lastEmit: now})
-			e.emitActivity(t, db.Activity{Worker: slot.Name, Kind: "text", Summary: slot.Name + " 绑定的 LLM 配置已恢复，可以继续领取任务"})
+			e.emitActivity(t, db.Activity{Worker: "system", Kind: "text", Summary: fmt.Sprintf("%s 绑定的 LLM 配置 #%d 已恢复，可以继续领取任务", slot.Name, slot.ProfileID)})
 		}
 		return
 	}
@@ -756,7 +758,7 @@ func (e *Engine) reportSlotAvailability(t *Task, slot WorkerSlot, err error) {
 		e.slotState.Store(key, state)
 	}
 	summary := fmt.Sprintf("%s 绑定的 LLM 配置 #%d 不可用（已删除或配置无效），该会话暂停领取任务，不会回退到默认模型", slot.Name, slot.ProfileID)
-	e.emitActivity(t, db.Activity{Worker: slot.Name, Kind: "text", IsError: true, Summary: summary, Detail: err.Error()})
+	e.emitActivity(t, db.Activity{Worker: "system", Kind: "text", IsError: true, Summary: summary, Detail: err.Error()})
 	log.Printf("[worker %s] task %s pinned profile #%d unavailable: %v", slot.Name, t.ID, slot.ProfileID, err)
 }
 
@@ -807,6 +809,11 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 		return
 	}
 	rt := e.registerTaskRoutines(ctx, t.ID, 1+len(slots))
+	plan := make(map[string]int64, len(slots))
+	for _, slot := range slots {
+		plan[slot.Name] = slot.ProfileID
+	}
+	e.slotPlans.Store(t.ID, plan)
 	e.deleteMu.RUnlock()
 	e.touch(t.ID)
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.plannerLoop(loopCtx, t) })
@@ -1245,16 +1252,36 @@ func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64,
 			e.decInflight(t.ID)
 		}
 	}()
-	_, worker := e.snapshotFor(t)
-	if worker == nil {
-		return fmt.Errorf("worker 尚未就绪")
-	}
 	node, err := t.Store.GetNode(intentID)
 	if err != nil {
 		return err
 	}
 	if node == nil || node.Kind != db.KindIntent {
 		return fmt.Errorf("intent not found")
+	}
+	owner := node.Owner
+	var worker *agent.Worker
+	if value, ok := e.slotPlans.Load(t.ID); ok {
+		if plan, ok := value.(map[string]int64); ok {
+			if profileID, pinned := plan[owner]; pinned && profileID > 0 {
+				if e.workerResolve == nil {
+					return fmt.Errorf("意图所属的 LLM 配置 #%d 不可用：pinned worker resolver unavailable", profileID)
+				}
+				worker, err = e.workerResolve(t, WorkerSlot{Name: owner, ProfileID: profileID})
+				if err != nil || worker == nil {
+					if err == nil {
+						err = errors.New("worker resolver returned no worker")
+					}
+					return fmt.Errorf("意图所属的 LLM 配置 #%d 不可用：%w", profileID, err)
+				}
+			}
+		}
+	}
+	if worker == nil {
+		_, worker = e.snapshotFor(t)
+		if worker == nil {
+			return fmt.Errorf("worker 尚未就绪")
+		}
 	}
 	changed, err := t.Store.CompareAndSetIntentState(intentID, "paused", "running")
 	if err != nil {
