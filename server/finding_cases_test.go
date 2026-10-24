@@ -84,9 +84,10 @@ func TestFindingCaseToolMigrationPreservesBindings(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
-		name   string
-		v1, v2 bool
+		name          string
+		v1, v2, fresh bool
 	}{
+		{name: "fresh", fresh: true},
 		{name: "initial"},
 		{name: "v1_to_v3", v1: true},
 		{name: "v2_to_v3", v1: true, v2: true},
@@ -107,7 +108,11 @@ func TestFindingCaseToolMigrationPreservesBindings(t *testing.T) {
 				}
 			}
 			for _, tool := range s.findingCaseTools() {
-				if err := pg.UpdateTool(tool.Name(), "old description", json.RawMessage(`{}`), json.RawMessage(`["custom-agent"]`), false); err != nil {
+				if tc.fresh {
+					if _, err := pg.Exec(`DELETE FROM tools WHERE key=$1`, tool.Name()); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := pg.UpdateTool(tool.Name(), "old description", json.RawMessage(`{}`), json.RawMessage(`["custom-agent"]`), false); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -117,11 +122,8 @@ func TestFindingCaseToolMigrationPreservesBindings(t *testing.T) {
 				if err != nil || row == nil {
 					t.Fatal("missing tool", tool.Name(), err)
 				}
-				wantReporter := !tc.v1
-				if tool.Name() == "complete_finding_case_review" {
-					wantReporter = !tc.v2
-				}
-				if contains(row.Agents, "reporter") != wantReporter || !contains(row.Agents, "custom-agent") || row.Enabled {
+				wantReporter := !tc.v2 && (!tc.v1 || tool.Name() == "complete_finding_case_review")
+				if contains(row.Agents, "reporter") != wantReporter || contains(row.Agents, "custom-agent") == tc.fresh || row.Enabled != tc.fresh {
 					t.Fatalf("binding/enabled configuration changed incorrectly: %+v", row)
 				}
 				if row.Description != tool.Description() || len(row.Schema) <= 2 {
@@ -133,19 +135,21 @@ func TestFindingCaseToolMigrationPreservesBindings(t *testing.T) {
 					t.Fatalf("migration flag %s not saved: %q, %v", flag, value, err)
 				}
 			}
-			if err := pg.RemoveAgentFromTool("reporter", "complete_finding_case_review"); err != nil {
-				t.Fatal(err)
-			}
-			// A refresh retry must not replay a completed legacy binding migration.
-			if tc.v1 {
-				if err := pg.SetSetting("finding_case_tools_v3_review", "false"); err != nil {
+			for _, tool := range s.findingCaseTools() {
+				if err := pg.RemoveAgentFromTool("reporter", tool.Name()); err != nil {
 					t.Fatal(err)
 				}
 			}
+			// A refresh retry must not replay a completed legacy binding migration.
+			if err := pg.SetSetting("finding_case_tools_v3_review", "false"); err != nil {
+				t.Fatal(err)
+			}
 			s.seedFindingCaseTools()
-			row, err := pg.GetTool("complete_finding_case_review")
-			if err != nil || row == nil || contains(row.Agents, "reporter") {
-				t.Fatal("refresh restored an operator-removed binding", row, err)
+			for _, tool := range s.findingCaseTools() {
+				row, err := pg.GetTool(tool.Name())
+				if err != nil || row == nil || contains(row.Agents, "reporter") {
+					t.Fatal("refresh restored an operator-removed binding", row, err)
+				}
 			}
 		})
 	}

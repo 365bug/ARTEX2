@@ -404,21 +404,20 @@ func (s *Server) seedFindingCaseTools() {
 		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
 			log.Printf("[finding-cases] refresh %s schema failed: %v", t.Name(), err)
 		}
+		if previousReview == "true" {
+			continue
+		}
 		if err := s.m.pg.SeedTool(t.Name(), t.Description(), schema, json.RawMessage(`["reporter"]`)); err != nil {
 			return
 		}
-		needsBinding := previous != "true"
-		if t.Name() == "complete_finding_case_review" {
-			needsBinding = previousReview != "true"
-		}
-		if needsBinding {
+		if previous != "true" || t.Name() == "complete_finding_case_review" {
 			names = append(names, t.Name())
 		}
 	}
-	if err := s.m.pg.AddAgentToToolBinding("reporter", names); err != nil {
-		return
-	}
 	if previousReview != "true" {
+		if err := s.m.pg.AddAgentToToolBinding("reporter", names); err != nil {
+			return
+		}
 		if err := s.m.pg.SetSetting("finding_case_tools_v2_review", "true"); err != nil {
 			return
 		}
