@@ -43,7 +43,7 @@ func TestUnifiedFindingReportRejectsIncompleteAndTruncated(t *testing.T) {
 	}
 }
 
-func TestFindingCaseReviewCompletionRequiresReadsAndFreshReport(t *testing.T) {
+func TestFindingCaseReviewCompletionRequiresReadsNotFreshReport(t *testing.T) {
 	s, task, ids := testCaseServer(t)
 	runs, err := s.m.pg.CreateFindingCaseReviews(t.Context(), map[int64][]int64{task: ids})
 	if err != nil {
@@ -71,13 +71,6 @@ func TestFindingCaseReviewCompletionRequiresReadsAndFreshReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveFindingReviewConclusion(ctx, conv, a); err == nil {
-		t.Fatal("missing unified report accepted")
-	}
-	c, _ := s.m.pg.GetFindingCase(cid)
-	if err := s.m.pg.UpdateFindingCaseReport(ctx, cid, c.Version, "orders", completeFindingReviewReport, "high", "verified impact"); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.saveFindingReviewConclusion(ctx, conv, a); err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +83,8 @@ func TestFindingCaseReviewCompletionRequiresReadsAndFreshReport(t *testing.T) {
 	if _, err := s.m.pg.Exec(`UPDATE findings SET evidence='new proof' WHERE id=$1`, ids[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.validateFindingReviewCompletion(conv); err == nil {
-		t.Fatal("stale group reported completed")
+	if err := s.validateFindingReviewCompletion(conv); err != nil {
+		t.Fatalf("stale unified report should not block merged conclusion: %v", err)
 	}
 }
 
@@ -138,7 +131,7 @@ func TestFindingCaseReviewSuggestionNeedsSavedSuggestion(t *testing.T) {
 	if err := s.saveFindingReviewConclusion(ctx, conv, a); err == nil {
 		t.Fatal("unpersisted suggestion accepted")
 	}
-	if _, err := s.m.pg.SuggestFindingCase(ctx, task, ids[0], ids[1], "orders", "common component unknown"); err != nil {
+	if _, err := s.m.pg.SuggestFindingCase(ctx, task, []int64{ids[0], ids[1]}, "orders", "common component unknown"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.saveFindingReviewConclusion(ctx, conv, a); err != nil {

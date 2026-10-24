@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
@@ -203,12 +204,22 @@ func (s *Server) caseSuggestions(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) resolveCaseSuggestion(w http.ResponseWriter, r *http.Request) {
 	var a struct {
-		Accept bool `json:"accept"`
+		Accept     bool     `json:"accept"`
+		ExcludeIDs []string `json:"exclude_ids"`
 	}
 	if !decodeCaseRequest(w, r, &a) {
 		return
 	}
-	id, err := s.m.pg.ResolveFindingCaseSuggestion(r.Context(), int64(atoiDefault(r.PathValue("id"), 0)), a.Accept)
+	exclude := make([]int64, 0, len(a.ExcludeIDs))
+	for _, raw := range a.ExcludeIDs {
+		id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil || id <= 0 {
+			caseHTTPError(w, errors.New("无效的排除记录编号"))
+			return
+		}
+		exclude = append(exclude, id)
+	}
+	id, err := s.m.pg.ResolveFindingCaseSuggestion(r.Context(), int64(atoiDefault(r.PathValue("id"), 0)), a.Accept, exclude)
 	if err != nil {
 		caseHTTPError(w, err)
 		return
@@ -253,10 +264,10 @@ func (s *Server) findingCaseTools() []actool.CoreTool {
 		name, desc string
 		required   []string
 	}{
-		{"search_finding_duplicates", "只读检索同任务候选，返回摘要与资产；等级不同也可能重复。支持分页，按需读取详情。", []string{"finding_id"}},
+		{"search_finding_duplicates", "只读检索同任务候选摘要与资产，按分数排序并返回 score、tier、hit_reasons：strong=同漏洞类型且资产重叠，weak=单一条件命中仅作参考。等级不同也可能重复。支持分页，按需读取详情。", []string{"finding_id"}},
 		{"get_finding_record", "读取独立漏洞完整原始证据和报告，返回探索节点编号以便追溯执行记录。", []string{"finding_id"}},
 		{"merge_finding_records", "证据明确证明同一缺陷时归并；保留所有原始记录。不跨任务、不改变原评级，不可绕过人工否决。", []string{"task_id", "finding_ids", "title", "reason"}},
-		{"suggest_finding_merge", "证据不足时提交疑似重复建议，待人工确认；不是自动合并。只允许两条同任务记录。", []string{"task_id", "finding_ids", "title", "reason"}},
+		{"suggest_finding_merge", "证据存在具体共同点但缺少关键证据时，提交一个疑似重复分组（2..20 条同任务记录，一次覆盖全部疑似成员，不要拆成两两建议），待人工确认；不是自动合并。仅类型/资产相同不应提交。", []string{"task_id", "finding_ids", "title", "reason"}},
 		{"get_finding_case", "读取归并组和成员分页。先记录version，再读取成员的原报告、证据及流量；版本变化必须重新读取。", []string{"case_id"}},
 		{"update_finding_case_report", "保存统一报告及评级理由，version必须来自实际读取。保留各条原报告，不新建漏洞。", []string{"case_id", "version", "title", "report", "severity", "severity_reason"}},
 	}
@@ -312,8 +323,9 @@ func (s *Server) performFindingCaseTool(ctx context.Context, name string, a find
 		if scope != nil {
 			scopes = append(scopes, scope)
 		}
-		items, total, err := s.m.pg.FindingCaseCandidates(fid, page, 20, scopes...)
-		return map[string]any{"items": items, "total": total, "page": page, "page_size": 20}, err
+		items, total, strongTotal, err := s.m.pg.FindingCaseCandidates(fid, page, 20, scopes...)
+		return map[string]any{"items": items, "total": total, "strong_total": strongTotal, "page": page, "page_size": 20,
+			"note": "按分数排序；weak 为单一条件命中，仅作参考，通常不应据此建议归并"}, err
 	case "get_finding_record":
 		f, err := s.m.pg.GetFinding(fid)
 		if err != nil {
@@ -341,11 +353,11 @@ func (s *Server) performFindingCaseTool(ctx context.Context, name string, a find
 		return map[string]string{"case_id": i64s(id)}, err
 	case "suggest_finding_merge":
 		ids := a.ids()
-		if len(ids) != 2 {
-			return nil, errors.New("疑似重复建议需要两条记录")
+		if len(ids) < 2 || len(ids) > 20 {
+			return nil, errors.New("疑似重复分组需要2至20条记录")
 		}
-		id, err := s.m.pg.SuggestFindingCase(ctx, parseProfileID(a.TaskID), ids[0], ids[1], a.Title, a.Reason)
-		return map[string]string{"suggestion_id": i64s(id)}, err
+		id, err := s.m.pg.SuggestFindingCase(ctx, parseProfileID(a.TaskID), ids, a.Title, a.Reason)
+		return map[string]any{"suggestion_id": i64s(id), "finding_ids": ids}, err
 	case "get_finding_case":
 		c, err := s.m.pg.GetFindingCase(cid)
 		if err != nil {
