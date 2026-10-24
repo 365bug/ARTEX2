@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -272,10 +273,95 @@ func repeaterCheckURL(u *url.URL) error {
 		host = host[:zone]
 	}
 	ip := net.ParseIP(host)
+	if ip == nil && repeaterLooksNumericHost(host) {
+		var ok bool
+		ip, ok = repeaterParseLegacyIPv4(host)
+		if !ok {
+			return fmt.Errorf("拒绝无法解析的数字主机地址 %q", host)
+		}
+	}
 	if strings.EqualFold(host, "localhost") || (ip != nil && repeaterIsBlockedDialIP(ip)) {
 		return fmt.Errorf("拒绝访问本机/链路本地地址（如确需访问本机服务，设置 %s=1）", repeaterAllowLocalEnv)
 	}
 	return nil
+}
+
+// repeaterLooksNumericHost identifies the legacy numeric spellings accepted by
+// common proxy/resolver implementations (decimal, octal, hexadecimal and
+// dotted inet_aton forms). A numeric-looking value that fails to parse is
+// rejected instead of being handed to a proxy for its own interpretation.
+func repeaterLooksNumericHost(host string) bool {
+	if host == "" || host[0] < '0' || host[0] > '9' {
+		return false
+	}
+	for i := 0; i < len(host); i++ {
+		c := host[i]
+		switch {
+		case c == '.':
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		case c == 'x' || c == 'X':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// repeaterParseLegacyIPv4 follows inet_aton's 1-, 2-, 3- and 4-part IPv4
+// notation. Parts with a leading zero are octal and parts with 0x are hex.
+func repeaterParseLegacyIPv4(host string) (net.IP, bool) {
+	parts := strings.Split(host, ".")
+	if len(parts) < 1 || len(parts) > 4 {
+		return nil, false
+	}
+	values := make([]uint64, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		base := 10
+		digits := part
+		if len(digits) > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X') {
+			base, digits = 16, digits[2:]
+		} else if len(digits) > 1 && digits[0] == '0' {
+			base = 8
+		}
+		if digits == "" {
+			return nil, false
+		}
+		value, err := strconv.ParseUint(digits, base, 32)
+		if err != nil {
+			return nil, false
+		}
+		values[i] = value
+	}
+	var value uint64
+	switch len(values) {
+	case 1:
+		value = values[0]
+	case 2:
+		if values[0] > 0xff || values[1] > 0xffffff {
+			return nil, false
+		}
+		value = values[0]<<24 | values[1]
+	case 3:
+		if values[0] > 0xff || values[1] > 0xff || values[2] > 0xffff {
+			return nil, false
+		}
+		value = values[0]<<24 | values[1]<<16 | values[2]
+	case 4:
+		for _, part := range values {
+			if part > 0xff {
+				return nil, false
+			}
+		}
+		value = values[0]<<24 | values[1]<<16 | values[2]<<8 | values[3]
+	}
+	if value > 0xffffffff {
+		return nil, false
+	}
+	return net.IPv4(byte(value>>24), byte(value>>16), byte(value>>8), byte(value)), true
 }
 
 func repeaterIsBlockedDialIP(ip net.IP) bool {

@@ -7,8 +7,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/traffic"
 )
 
 func repeaterTestSend(t *testing.T, s *Server, payload any) (int, repeaterSendResponse, string) {
@@ -69,6 +72,46 @@ func TestRepeaterBlockedIPs(t *testing.T) {
 	code, _, body := repeaterTestSend(t, &Server{}, map[string]any{"url": srv.URL, "use_recording_proxy": false})
 	if code != http.StatusBadRequest || !strings.Contains(body, "拒绝") {
 		t.Fatalf("loopback status=%d body=%s", code, body)
+	}
+}
+
+func TestRepeaterRejectsLegacyNumericHostsIncludingProxyPath(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "")
+	for _, raw := range []string{
+		"http://2130706433/", // decimal 127.0.0.1
+		"http://0177.0.0.1/", // octal 127.0.0.1
+		"http://127.1/",      // two-part inet_aton form
+		"http://0x7f000001/", // hexadecimal 127.0.0.1
+		"http://9999999999/", // numeric-looking but invalid
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repeaterCheckURL(u); err == nil {
+			t.Errorf("repeaterCheckURL(%q) allowed a legacy numeric host", raw)
+		}
+	}
+
+	// The check must run before a configured proxy gets a chance to interpret
+	// the legacy spelling and connect to loopback remotely.
+	proxy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("proxy received a blocked numeric target")
+	}))
+	defer proxy.Close()
+	s := &Server{m: &Manager{globalProxy: proxy.URL}}
+	code, _, body := repeaterTestSend(t, s, map[string]any{"url": "http://2130706433/"})
+	if code != http.StatusBadRequest || !strings.Contains(body, "拒绝") {
+		t.Fatalf("proxied legacy host status=%d body=%s", code, body)
+	}
+}
+
+func TestRepeaterBlockSensitiveDial(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "")
+	for _, address := range []string{"127.0.0.1:80", "169.254.169.254:80"} {
+		if err := repeaterBlockSensitiveDial("tcp", address, nil); err == nil {
+			t.Errorf("repeaterBlockSensitiveDial(%q) allowed blocked address", address)
+		}
 	}
 }
 
@@ -182,5 +225,24 @@ func TestRepeaterSocks5TransportConstruction(t *testing.T) {
 	proxyURL, err := tr.Proxy(httptest.NewRequest(http.MethodGet, "https://target.example/", nil))
 	if err != nil || proxyURL == nil || proxyURL.Scheme != "socks5" {
 		t.Fatalf("global proxy URL = %#v, err=%v", proxyURL, err)
+	}
+
+	// Capture mode supplies a complete HTTP URL from Traffic.ProxyAddr. The
+	// helper must preserve that scheme and host rather than prefixing http:// a
+	// second time.
+	captured, err := traffic.Open(t.TempDir(), "127.0.0.1:18788")
+	if err != nil {
+		t.Fatalf("traffic.Open: %v", err)
+	}
+	defer captured.Close()
+	s.m.traffic = captured
+	s.m.trafficOn = true
+	tr = s.httpProxyTransport(httpExec{UseRecordingProxy: true})
+	if tr == nil || tr.Proxy == nil {
+		t.Fatal("recording proxy was not configured")
+	}
+	proxyURL, err = tr.Proxy(httptest.NewRequest(http.MethodGet, "https://target.example/", nil))
+	if err != nil || proxyURL == nil || proxyURL.Scheme != "http" || proxyURL.Host != "127.0.0.1:18788" {
+		t.Fatalf("recording proxy URL = %#v, err=%v", proxyURL, err)
 	}
 }

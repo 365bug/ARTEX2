@@ -45,9 +45,15 @@ export function parseHeadersText(text: string): Record<string, string> {
     const name = line.slice(0, separator).trim();
     const value = line.slice(separator + 1).trim();
     if (!name) continue;
-    // The API accepts one value per name. Combining duplicates preserves the
-    // common comma-separated-header semantics for this MVP.
-    result[name] = result[name] ? `${result[name]}, ${value}` : value;
+    // The API accepts one value per name. Cookies use semicolon separators;
+    // other duplicate headers preserve the common comma-separated semantics.
+    const existingName = Object.keys(result).find((item) => item.toLowerCase() === name.toLowerCase());
+    if (!existingName) {
+      result[name] = value;
+    } else {
+      const separator = existingName.toLowerCase() === "cookie" ? "; " : ", ";
+      result[existingName] = `${result[existingName]}${separator}${value}`;
+    }
   }
   return result;
 }
@@ -224,6 +230,7 @@ export function FindingRepeaterDialog({
                   <button
                     key={entry.id}
                     type="button"
+                    disabled={busy}
                     className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-muted"
                     onClick={() => {
                       setMethod(entry.method);

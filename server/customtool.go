@@ -462,13 +462,12 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	proxyStr := strings.TrimSpace(spec.Proxy)
 	var caFile string
 	if spec.UseRecordingProxy {
-		// ProxyAddr is the local MITM address while capture is enabled, but
-		// returns the configured global proxy URL when capture is off. Keep the
-		// latter as a complete URL (including socks5:// and credentials) instead
-		// of prepending http:// to it.
+		// ProxyAddr is already a complete URL while capture is enabled, and
+		// returns the configured global proxy URL when capture is off. Keep both
+		// forms intact (including socks5:// and credentials).
 		if s.m.TrafficEnabled() {
 			if addr := s.m.ProxyAddr(); addr != "" {
-				proxyStr = "http://" + addr
+				proxyStr = addr
 				caFile = s.m.ProxyCACert()
 			}
 		} else if global := strings.TrimSpace(s.m.GlobalProxy()); global != "" {
