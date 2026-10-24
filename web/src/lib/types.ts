@@ -1737,7 +1737,6 @@ export interface FindingCaseSuggestion {
   title: string;
   reason: string;
   state: string;
-  finding_ids: string[];
 }
 export interface FindingCaseReviewRun {
   conversation_id: number;

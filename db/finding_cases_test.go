@@ -118,11 +118,11 @@ func TestFindingCaseScopeSuggestionsAndDeletion(t *testing.T) {
 	if _, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[0], fid}, "x", "x", "reporter"); err == nil {
 		t.Fatal("cross task accepted")
 	}
-	sid, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[0], ids[1]}, "order", "uncertain")
+	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[0], ids[1], "order", "uncertain")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.ResolveFindingCaseSuggestion(ctx, sid, false, nil); err != nil {
+	if _, err := d.ResolveFindingCaseSuggestion(ctx, sid, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.MergeFindingCase(ctx, task.ID, ids[:2], "x", "x", "reporter"); err == nil {
@@ -233,7 +233,7 @@ func TestFindingCaseTaskDeletionAndRepeatedDetach(t *testing.T) {
 func TestFindingCaseSuggestionResolutionIsAtomic(t *testing.T) {
 	d, task, ids := caseTestDB(t)
 	ctx := context.Background()
-	sid, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[0], ids[1]}, "orders", "uncertain")
+	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[0], ids[1], "orders", "uncertain")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestFindingCaseSuggestionResolutionIsAtomic(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, accept := range []bool{true, false} {
 		wg.Add(1)
-		go func(a bool) { defer wg.Done(); _, e := d.ResolveFindingCaseSuggestion(ctx, sid, a, nil); results <- e }(accept)
+		go func(a bool) { defer wg.Done(); _, e := d.ResolveFindingCaseSuggestion(ctx, sid, a); results <- e }(accept)
 	}
 	wg.Wait()
 	close(results)
@@ -269,7 +269,7 @@ func TestFindingCaseCandidatesAreCompactAndRelated(t *testing.T) {
 	if _, err := d.Exec(`UPDATE findings SET vulnclass='SQLi',name='search injection' WHERE id=$1`, ids[3]); err != nil {
 		t.Fatal(err)
 	}
-	items, total, _, err := d.FindingCaseCandidates(ids[0], 1, 1)
+	items, total, err := d.FindingCaseCandidates(ids[0], 1, 1)
 	if err != nil || total != 2 || len(items) != 1 {
 		t.Fatalf("candidate pagination %d %+v %v", total, items, err)
 	}
@@ -286,7 +286,7 @@ func TestFindingCaseCandidatesAreCompactAndRelated(t *testing.T) {
 	if err := d.RemoveFindingCaseMember(context.Background(), cid, ids[1], "different cause"); err != nil {
 		t.Fatal(err)
 	}
-	_, total, _, err = d.FindingCaseCandidates(ids[0], 1, 20)
+	_, total, err = d.FindingCaseCandidates(ids[0], 1, 20)
 	if err != nil || total != 1 {
 		t.Fatalf("veto excluded %d %v", total, err)
 	}
@@ -353,212 +353,5 @@ func TestFindingCaseViewContextAndAssetFiltering(t *testing.T) {
 	rows, total, err = d.ListFindingCases(FindingFilter{TaskID: fmt.Sprint(task.ID), Sort: "severity"}, 1, 1)
 	if err != nil || total != 2 || len(rows) != 1 || rows[0].Case == nil || rows[0].Case.ID != cid {
 		t.Fatalf("original severity order %+v %v", rows, err)
-	}
-}
-
-func suggestionState(t *testing.T, d *DB, id int64) string {
-	t.Helper()
-	var state string
-	if err := d.QueryRow(`SELECT state FROM finding_case_suggestions WHERE id=$1`, id).Scan(&state); err != nil {
-		t.Fatal(err)
-	}
-	return state
-}
-
-func TestFindingCaseClusterSuggestionLifecycle(t *testing.T) {
-	d, task, ids := caseTestDB(t)
-	ctx := context.Background()
-	pair, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[1], ids[0]}, "orders", "same handler, owner check unverified")
-	if err != nil {
-		t.Fatal(err)
-	}
-	group, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[0], ids[1], ids[2], ids[3]}, "orders", "same handler for all four")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if group == pair || suggestionState(t, d, pair) != "superseded" {
-		t.Fatalf("subset pair not superseded: %d %d %s", pair, group, suggestionState(t, d, pair))
-	}
-	// Re-suggesting a subset of a pending group reuses the group instead of adding a card.
-	again, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[2], ids[3]}, "orders", "dup")
-	if err != nil || again != group {
-		t.Fatalf("subset reuse %d %v", again, err)
-	}
-	list, err := d.FindingCaseSuggestions(task.ID)
-	if err != nil || len(list) != 1 || !reflect.DeepEqual(list[0].FindingIDs, []string{fmt.Sprint(ids[0]), fmt.Sprint(ids[1]), fmt.Sprint(ids[2]), fmt.Sprint(ids[3])}) {
-		t.Fatalf("grouped list %+v %v", list, err)
-	}
-	if _, err := d.ResolveFindingCaseSuggestion(ctx, group, true, []int64{ids[1], ids[2], ids[3]}); err == nil {
-		t.Fatal("accepted with fewer than two records")
-	}
-	cid, err := d.ResolveFindingCaseSuggestion(ctx, group, true, []int64{ids[3]})
-	if err != nil || cid == 0 {
-		t.Fatal(cid, err)
-	}
-	c, err := d.GetFindingCase(cid)
-	if err != nil || c.Count != 3 {
-		t.Fatalf("one merge of remaining members %+v %v", c, err)
-	}
-	if other, _ := d.FindingCaseID(ids[3]); other != 0 {
-		t.Fatal("excluded record merged")
-	}
-	if suggestionState(t, d, group) != "accepted" {
-		t.Fatal("group not accepted")
-	}
-	var events int
-	if err := d.QueryRow(`SELECT count(*) FROM finding_case_events WHERE case_id=$1 AND action='merge'`, cid).Scan(&events); err != nil || events != 1 {
-		t.Fatalf("merge events %d %v", events, err)
-	}
-	if _, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[0], ids[3]}, "x", "x", "reporter"); err == nil {
-		t.Fatal("human exclusion not kept as veto")
-	}
-	if _, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[2], ids[3]}, "x", "x"); err == nil {
-		t.Fatal("vetoed pair suggested again")
-	}
-	if _, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[0], ids[1]}, "x", "x"); err == nil {
-		t.Fatal("records already in one folder suggested")
-	}
-	if list, _ := d.FindingCaseSuggestions(task.ID); len(list) != 0 {
-		t.Fatalf("stale cards remain %+v", list)
-	}
-}
-
-func TestFindingCaseClusterRejectVetoesAllPairsAndMergeClearsCards(t *testing.T) {
-	d, task, ids := caseTestDB(t)
-	ctx := context.Background()
-	a, err := d.SuggestFindingCase(ctx, task.ID, ids[:3], "orders", "shared component")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.ResolveFindingCaseSuggestion(ctx, a, false, nil); err != nil {
-		t.Fatal(err)
-	}
-	var blocks int
-	if err := d.QueryRow(`SELECT count(*) FROM finding_case_blocks WHERE left_id=ANY(ARRAY[$1,$2,$3]::bigint[]) AND right_id=ANY(ARRAY[$1,$2,$3]::bigint[])`, ids[0], ids[1], ids[2]).Scan(&blocks); err != nil || blocks != 3 {
-		t.Fatalf("blocks %d %v", blocks, err)
-	}
-	b, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[2], ids[3]}, "orders", "same param")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A direct reporter merge covering a pending group clears the card.
-	if _, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[2], ids[3]}, "orders", "proof", "reporter"); err != nil {
-		t.Fatal(err)
-	}
-	if suggestionState(t, d, b) != "accepted" {
-		t.Fatal("covered suggestion still pending")
-	}
-}
-
-func TestFindingCaseCandidatesRankStrongBeforeWeak(t *testing.T) {
-	d, task, _ := caseTestDB(t)
-	add := func(class, name string, assets []int64) int64 {
-		id, err := d.AddFinding(task.ID, 0, class, name, "high", "s", "e", "worker", assets)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	base := add("SSRF", "fetch proxy", []int64{900001})
-	strong := add("SSRF", "image import", []int64{900001})
-	assetOnly := add("XSS", "comment", []int64{900001})
-	nameOnly := add("RCE", "fetch proxy", nil)
-	items, total, strongTotal, err := d.FindingCaseCandidates(base, 1, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 3 || strongTotal != 1 || len(items) != 3 {
-		t.Fatalf("recall kept %d strong %d %+v", total, strongTotal, items)
-	}
-	if items[0]["finding_id"] != fmt.Sprint(strong) || items[0]["tier"] != "strong" || !reflect.DeepEqual(items[0]["hit_reasons"], []string{"同漏洞类型", "资产重叠"}) {
-		t.Fatalf("strong first %+v", items[0])
-	}
-	if items[1]["finding_id"] != fmt.Sprint(assetOnly) || items[2]["finding_id"] != fmt.Sprint(nameOnly) || items[2]["tier"] != "weak" {
-		t.Fatalf("weak ordering %+v", items)
-	}
-	if items[0]["score"].(int) <= items[1]["score"].(int) {
-		t.Fatalf("scores %+v", items)
-	}
-	page2, total2, _, err := d.FindingCaseCandidates(base, 2, 2)
-	if err != nil || total2 != 3 || len(page2) != 1 || page2[0]["finding_id"] != fmt.Sprint(nameOnly) {
-		t.Fatalf("low score candidates stay paginated %+v %v", page2, err)
-	}
-}
-
-func TestFindingCaseClusterExclusionCannotBePulledInByFolder(t *testing.T) {
-	d, task, ids := caseTestDB(t)
-	ctx := context.Background()
-	if _, err := d.MergeFindingCase(ctx, task.ID, ids[:2], "orders", "proof", "reporter"); err != nil {
-		t.Fatal(err)
-	}
-	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[:3], "orders", "shared handler")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.ResolveFindingCaseSuggestion(ctx, sid, true, []int64{ids[1]}); err == nil {
-		t.Fatal("excluded member merged through its existing folder")
-	}
-	if cid, _ := d.FindingCaseID(ids[2]); cid != 0 || suggestionState(t, d, sid) != "pending" {
-		t.Fatal("failed exclusion was not rolled back")
-	}
-}
-
-func TestFindingCaseClusterRejectKeepsExistingFolderMergeable(t *testing.T) {
-	d, task, ids := caseTestDB(t)
-	ctx := context.Background()
-	cid, err := d.MergeFindingCase(ctx, task.ID, ids[:2], "orders", "proof", "reporter")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[:3], "orders", "shared handler")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.ResolveFindingCaseSuggestion(ctx, sid, false, nil); err != nil {
-		t.Fatal(err)
-	}
-	var inFolder int
-	if err := d.QueryRow(`SELECT count(*) FROM finding_case_blocks WHERE left_id=$1 AND right_id=$2`, ids[0], ids[1]).Scan(&inFolder); err != nil || inFolder != 0 {
-		t.Fatalf("co-membered pair vetoed: %d %v", inFolder, err)
-	}
-	if _, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[0], ids[2]}, "x", "x", "reporter"); err == nil {
-		t.Fatal("rejected pair merged")
-	}
-	if got, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[1], ids[3]}, "orders", "proof", "reporter"); err != nil || got != cid {
-		t.Fatalf("folder poisoned by reject: %d %v", got, err)
-	}
-}
-
-func TestFindingCaseClusterSurvivesAnchorDeletion(t *testing.T) {
-	d, task, ids := caseTestDB(t)
-	ctx := context.Background()
-	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[:3], "orders", "shared handler")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n, err := d.DeleteFinding(ids[0]); err != nil || n != 1 {
-		t.Fatal(n, err)
-	}
-	list, err := d.FindingCaseSuggestions(task.ID)
-	if err != nil || len(list) != 1 || list[0].ID != sid || !reflect.DeepEqual(list[0].FindingIDs, []string{fmt.Sprint(ids[1]), fmt.Sprint(ids[2])}) {
-		t.Fatalf("group lost with its anchor: %+v %v", list, err)
-	}
-	if list[0].LeftID != ids[1] || list[0].RightID != ids[2] {
-		t.Fatalf("anchors not moved: %+v", list[0])
-	}
-	if cid, err := d.ResolveFindingCaseSuggestion(ctx, sid, true, nil); err != nil || cid == 0 {
-		t.Fatal(cid, err)
-	}
-	// Deleting below two members still drops the pair through the cascade.
-	pair, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[2], ids[3]}, "orders", "x")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.DeleteFinding(ids[3]); err != nil {
-		t.Fatal(err)
-	}
-	var n int
-	if err := d.QueryRow(`SELECT count(*) FROM finding_case_suggestions WHERE id=$1`, pair).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("two-member group kept after anchor deletion: %d %v", n, err)
 	}
 }

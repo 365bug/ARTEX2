@@ -192,18 +192,15 @@ function FindingMergeSuggestionCard({
   onResolve,
 }: {
   suggestion: FindingCaseSuggestion;
-  onResolve: (s: FindingCaseSuggestion, accept: boolean, excludeIds?: string[]) => Promise<void>;
+  onResolve: (s: FindingCaseSuggestion, accept: boolean) => Promise<void>;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const ids = s.finding_ids.length ? s.finding_ids : [s.left_id, s.right_id];
-  const [excluded, setExcluded] = React.useState<string[]>([]);
-  const included = ids.filter((id) => !excluded.includes(id));
   async function resolve(accept: boolean) {
     if (busy) return;
     setBusy(true);
     try {
-      await onResolve(s, accept, accept ? excluded : []);
+      await onResolve(s, accept);
     } finally {
       setBusy(false);
     }
@@ -212,37 +209,17 @@ function FindingMergeSuggestionCard({
     <Card size="sm" className="min-w-0">
       <CardHeader>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">疑似重复分组 · {ids.length} 条 · 待确认</Badge>
+          <Badge variant="outline">疑似重复 · 待确认</Badge>
           <CardDescription>任务 #{s.task_id}</CardDescription>
         </div>
         <CardTitle className="break-words">{s.title}</CardTitle>
-        <CardDescription className="flex flex-col gap-1">
-          {ids.map((id) => (
-            <span key={id} className="flex items-center gap-2">
-              <Checkbox
-                checked={!excluded.includes(id)}
-                disabled={busy}
-                onCheckedChange={(v) =>
-                  setExcluded((old) =>
-                    v === true ? old.filter((x) => x !== id) : [...old.filter((x) => x !== id), id],
-                  )
-                }
-                aria-label={`归并时包含上报 #${id}`}
-              />
-              <Link
-                className={cn(
-                  "underline underline-offset-4",
-                  excluded.includes(id) && "text-muted-foreground line-through",
-                )}
-                href={`/function/findings/detail/?id=${id}`}
-              >
-                查看原报告 #{id}
-              </Link>
-            </span>
-          ))}
-          {excluded.length > 0 ? (
-            <span className="text-xs">已排除 {excluded.length} 条：确认后这些记录不会再与本组建议归并</span>
-          ) : null}
+        <CardDescription className="flex flex-wrap gap-3">
+          <Link className="underline underline-offset-4" href={`/function/findings/detail/?id=${s.left_id}`}>
+            查看原报告 #{s.left_id}
+          </Link>
+          <Link className="underline underline-offset-4" href={`/function/findings/detail/?id=${s.right_id}`}>
+            查看原报告 #{s.right_id}
+          </Link>
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -261,12 +238,11 @@ function FindingMergeSuggestionCard({
         </Collapsible>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={busy || included.length < 2} onClick={() => resolve(true)}>
-          {busy ? <Spinner /> : null}
-          {included.length === ids.length ? "整组确认归并" : `确认归并所选（${included.length} 条）`}
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => resolve(true)}>
+          {busy ? <Spinner /> : null}确认归并
         </Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => resolve(false)}>
-          整组不是同一漏洞
+          不是同一漏洞
         </Button>
       </CardFooter>
     </Card>
@@ -295,20 +271,14 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
   const [suggestions, setSuggestions] = React.useState<FindingCaseSuggestion[]>([]);
   const [runs, setRuns] = React.useState<FindingCaseReviewRun[]>([]);
   const [error, setError] = React.useState("");
-  // Only the newest suggestions request (poll or post-resolve refresh) may write the list,
-  // so an older response cannot bring back a resolved group or another task's list.
-  const listSeq = React.useRef(0);
-  const currentTask = React.useRef(taskId);
-  currentTask.current = taskId;
   React.useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     async function load() {
-      const seq = ++listSeq.current;
       try {
         const [s, r] = await Promise.all([api.findingCaseSuggestions(taskId), api.findingCaseReviewRuns()]);
         if (active) {
-          if (seq === listSeq.current) setSuggestions(s);
+          setSuggestions(s);
           setRuns(r.filter((x) => !taskId || x.task_id === taskId));
           setError("");
         }
@@ -324,21 +294,10 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
       clearTimeout(timer);
     };
   }, [taskId]);
-  async function resolve(s: FindingCaseSuggestion, accept: boolean, excludeIds: string[] = []) {
+  async function resolve(s: FindingCaseSuggestion, accept: boolean) {
     try {
-      const result = await api.resolveFindingCaseSuggestion(s.id, accept, excludeIds);
-      // A resolve that finishes after switching tasks must not touch the new task's list.
-      if (currentTask.current === taskId) {
-        const seq = ++listSeq.current;
-        setSuggestions((v) => v.filter((x) => x.id !== s.id));
-        // Server-side resolution may also clear related groups; refresh instead of waiting for the poll.
-        api
-          .findingCaseSuggestions(taskId)
-          .then((v) => {
-            if (seq === listSeq.current && currentTask.current === taskId) setSuggestions(v);
-          })
-          .catch(() => undefined);
-      }
+      const result = await api.resolveFindingCaseSuggestion(s.id, accept);
+      setSuggestions((v) => v.filter((x) => x.id !== s.id));
       if (accept && result.case_id !== "0") {
         toast.success("已归并，请进入文件夹生成统一报告");
       } else {
