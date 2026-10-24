@@ -968,8 +968,6 @@ export interface Settings {
   global_proxy?: string;
   python_interpreter?: string; // 自定义脚本工具的 python 解释器路径(空=运行时检测)
   workers?: number; // 并发工作 agent 数(默认3)；对之后启动的任务生效
-  // 多模型 Worker 池：每个 LLM 配置各自占用若干并发会话。空/缺省=走上面的 workers 遗留模式。
-  worker_pools?: { profile_id: number; workers: number }[];
   // 任务并发上限:同时「运行中」的任务数上限。关闭=不限;开启后新建任务超限则排队,有空位自动启动。
   task_concurrency_enabled?: boolean; // 默认 false
   task_concurrency_limit?: number; // 开启后默认 5

@@ -148,11 +148,6 @@ type Engine struct {
 	// (for example an exhausted failover chain) — there is no global-pair fallback.
 	resolve              func(t *Task) (*agent.Planner, *agent.Worker)
 	resolveAuthoritative bool
-	// resolveWorker returns the Work Agent for one spawn slot. profileID 0 → unbound
-	// task-router worker (legacy); non-zero → worker pinned to that LLM profile.
-	// For profileID 0, a nil result falls back to snapshotFor; for pinned slots,
-	// nil means wait/retry (never switch to another model).
-	resolveWorker func(t *Task, profileID int64) *agent.Worker
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness func() bool
@@ -720,12 +715,6 @@ func (e *Engine) SetAuthoritativeAgentResolver(fn func(t *Task) (*agent.Planner,
 	e.resolveAuthoritative = true
 }
 
-// SetWorkerResolver installs the per-slot worker factory used by workerLoop when
-// multi-model pools assign a profile to a session (work#N). Called once at startup.
-func (e *Engine) SetWorkerResolver(fn func(t *Task, profileID int64) *agent.Worker) {
-	e.resolveWorker = fn
-}
-
 // snapshotFor returns the planner/worker a task should run on, from the task-router
 // resolver. nil,nil means the task is deliberately unavailable (e.g. an exhausted
 // failover chain); there is no global-pair fallback.
@@ -757,7 +746,7 @@ func (e *Engine) ReadyFor(t *Task) bool {
 // but no-op until an LLM is configured (so a task created while idle picks up
 // automatically once LLM is set from the UI).
 func (e *Engine) Run(ctx context.Context, t *Task) {
-	slots := e.m.WorkerSlots()
+	workers := e.m.Workers()
 	e.deleteMu.RLock()
 	if e.IsDeleting(t.ID) {
 		e.deleteMu.RUnlock()
@@ -768,13 +757,13 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 		t.Notify() // already running — just nudge a planning round
 		return
 	}
-	rt := e.registerTaskRoutines(ctx, t.ID, 1+len(slots))
+	rt := e.registerTaskRoutines(ctx, t.ID, 1+workers)
 	e.deleteMu.RUnlock()
 	e.touch(t.ID)
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.plannerLoop(loopCtx, t) })
-	for _, slot := range slots {
-		name, profileID := slot.Name, slot.ProfileID
-		runTaskRoutine(rt, func(loopCtx context.Context) { e.workerLoop(loopCtx, t, name, profileID) })
+	for i := 0; i < workers; i++ {
+		name := fmt.Sprintf("work#%d", i+1)
+		runTaskRoutine(rt, func(loopCtx context.Context) { e.workerLoop(loopCtx, t, name) })
 	}
 	e.startDeadlineCoordinator(ctx, t) // 任务级超时定时器(仅 timeout>0;去重)
 	// 仅在「完全没有活动意图(open+running)」时才 kick 首轮规划。带种子意图的任务:种子已
@@ -924,23 +913,14 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	}
 }
 
-func (e *Engine) workerLoop(ctx context.Context, t *Task, name string, profileID int64) {
+func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		var worker *agent.Worker
-		if e.resolveWorker != nil {
-			worker = e.resolveWorker(t, profileID)
-		}
-		// Legacy unbound slots (profileID 0) may fall back to the task-router
-		// snapshot. Pinned multi-model pool slots must NOT silently switch models
-		// when the assigned profile is missing/unavailable — wait and retry.
-		if worker == nil && profileID == 0 {
-			_, worker = e.snapshotFor(t)
-		}
+		_, worker := e.snapshotFor(t)
 		if worker == nil {
 			if sleepCtx(ctx, 1500*time.Millisecond) {
 				return

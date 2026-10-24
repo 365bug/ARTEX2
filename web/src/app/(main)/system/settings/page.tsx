@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, PlusIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon, Trash2Icon } from "lucide-react";
+import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
-import type { LLMProfile, Settings } from "@/lib/types";
+import type { Settings } from "@/lib/types";
 
 import { BasicAuthCard } from "./_components/basic-auth-card";
 import { UpdateCard } from "./_components/update-card";
@@ -45,8 +45,6 @@ export default function SystemSettingsPage() {
   const [pyInterp, setPyInterp] = React.useState("");
   const [workers, setWorkers] = React.useState("3");
   const [savingWorkers, setSavingWorkers] = React.useState(false);
-  const [llmProfiles, setLlmProfiles] = React.useState<LLMProfile[]>([]);
-  const [workerPools, setWorkerPools] = React.useState<{ profile_id: string; workers: string }[]>([]);
   // 操作约束注入范围(默认都开)。
   const [injectPlanner, setInjectPlanner] = React.useState(true);
   const [injectWorker, setInjectWorker] = React.useState(true);
@@ -69,53 +67,23 @@ export default function SystemSettingsPage() {
     setGlobalProxyInput(s.global_proxy ?? "");
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
-    setWorkerPools(
-      (s.worker_pools ?? []).map((p) => ({
-        profile_id: String(p.profile_id),
-        workers: String(p.workers),
-      })),
-    );
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
   }, []);
 
   const saveWorkers = () => {
-    const pools: { profile_id: number; workers: number }[] = [];
-    for (let i = 0; i < workerPools.length; i++) {
-      const row = workerPools[i];
-      const pid = Number(row.profile_id);
-      const n = Number(row.workers);
-      if (!Number.isInteger(pid) || pid <= 0) {
-        toast.error(`第 ${i + 1} 行：请选择 LLM 配置`);
-        return;
-      }
-      if (!Number.isInteger(n) || n <= 0) {
-        toast.error(`第 ${i + 1} 行：Worker 数必须是大于 0 的整数`);
-        return;
-      }
-      pools.push({ profile_id: pid, workers: n });
-    }
-    const legacy = Number(workers);
-    if (pools.length === 0 && (!Number.isInteger(legacy) || legacy <= 0)) {
-      toast.error("默认并发数必须是大于 0 的整数");
-      return;
-    }
-    const total = pools.length > 0 ? pools.reduce((s, p) => s + p.workers, 0) : legacy;
-    if (total > 50) {
-      toast.error("Worker 合计最多 50");
+    const n = Number(workers);
+    if (!Number.isInteger(n) || n <= 0) {
+      toast.error("并发数必须是大于 0 的整数");
       return;
     }
     setSavingWorkers(true);
     api
-      .setSettings({ workers: total, worker_pools: pools })
+      .setSettings({ workers: n })
       .then((s) => {
         apply(s);
-        toast.success(
-          pools.length > 0
-            ? `已保存多模型 Worker 池（共 ${total} 个会话；对之后启动的任务生效）`
-            : "已保存并发工作 agent 数（对之后启动的任务生效）",
-        );
+        toast.success("已保存并发工作 agent 数（对之后启动的任务生效）");
       })
       .catch((e) => toast.error("保存失败：" + (e as Error).message))
       .finally(() => setSavingWorkers(false));
@@ -142,11 +110,9 @@ export default function SystemSettingsPage() {
   };
 
   React.useEffect(() => {
-    Promise.all([api.settings(), api.llmProfiles().catch(() => [] as LLMProfile[])])
-      .then(([s, profiles]) => {
-        apply(s);
-        setLlmProfiles(profiles);
-      })
+    api
+      .settings()
+      .then(apply)
       .catch(() => undefined)
       .finally(() => setLoaded(true));
   }, [apply]);
@@ -782,114 +748,24 @@ export default function SystemSettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <CpuIcon className="size-4" />
-              工作并发 · Work Agent / 多模型池
+              工作并发 · Work Agent 数
             </CardTitle>
             <CardDescription>
-              可为多个 LLM 配置各分配若干 Worker；同一任务内多模型并行执行，按会话（work#N）绑定模型。
-              未配置模型池时，使用下方「默认并发」走单一模型（与历史行为一致）。修改后
+              每个任务并发运行的工作 agent 数量（默认 3）。数值越大并发探测越多、消耗也越高。修改后
               <b>对之后启动的任务生效</b>，正在运行的任务不受影响。
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label className="text-sm font-normal text-muted-foreground">
-                默认并发（未配置多模型池时使用）
-              </Label>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
               <Input
                 type="number"
                 min={1}
                 className="w-32 font-mono text-sm"
                 placeholder="3"
                 value={workers}
-                disabled={!loaded || savingWorkers || workerPools.length > 0}
+                disabled={!loaded || savingWorkers}
                 onChange={(e) => setWorkers(e.target.value)}
               />
-              {workerPools.length > 0 ? (
-                <p className="text-muted-foreground text-xs">已配置模型池时以各池合计为准，默认并发输入已锁定。</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-2 border-t pt-4">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="text-sm font-normal text-muted-foreground">多模型 Worker 池</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!loaded || savingWorkers || llmProfiles.length === 0}
-                  onClick={() =>
-                    setWorkerPools((rows) => [
-                      ...rows,
-                      {
-                        profile_id: llmProfiles[0]?.id ?? "",
-                        workers: "1",
-                      },
-                    ])
-                  }
-                >
-                  <PlusIcon className="size-3.5" />
-                  添加模型池
-                </Button>
-              </div>
-              {llmProfiles.length === 0 ? (
-                <p className="text-xs text-amber-500">尚未配置 LLM：请先到「系统 → LLM 配置」添加并激活。</p>
-              ) : null}
-              {workerPools.map((row, idx) => (
-                <div key={idx} className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={row.profile_id}
-                    disabled={!loaded || savingWorkers}
-                    onValueChange={(v) =>
-                      setWorkerPools((rows) => rows.map((r, i) => (i === idx ? { ...r, profile_id: v } : r)))
-                    }
-                  >
-                    <SelectTrigger className="w-56">
-                      <SelectValue placeholder="选择 LLM 配置" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {llmProfiles.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name || p.model}
-                          {p.is_default ? " · 激活" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    type="number"
-                    min={1}
-                    className="w-24 font-mono text-sm"
-                    value={row.workers}
-                    disabled={!loaded || savingWorkers}
-                    onChange={(e) =>
-                      setWorkerPools((rows) =>
-                        rows.map((r, i) => (i === idx ? { ...r, workers: e.target.value } : r)),
-                      )
-                    }
-                  />
-                  <span className="text-muted-foreground text-xs">Workers</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={!loaded || savingWorkers}
-                    onClick={() => setWorkerPools((rows) => rows.filter((_, i) => i !== idx))}
-                    aria-label="移除模型池"
-                  >
-                    <Trash2Icon className="size-4 text-destructive" />
-                  </Button>
-                </div>
-              ))}
-              <p className="text-muted-foreground text-xs">
-                当前合计：
-                {workerPools.length > 0
-                  ? workerPools.reduce((s, r) => s + (Number(r.workers) || 0), 0)
-                  : Number(workers) || 0}{" "}
-                个 Worker 会话
-              </p>
-            </div>
-
-            <div>
               <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
                 保存
               </Button>
