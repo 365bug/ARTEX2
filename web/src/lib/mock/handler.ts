@@ -2249,7 +2249,15 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/traffic") return D.traffic;
   if (path === "/traffic/exchange") return D.trafficDetail;
   if (path === "/settings" && m === "GET") return D.settings;
-  if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };
+  if (path === "/settings" && m === "PUT") {
+    const next = { ...D.settings, ...b };
+    if (!Array.isArray(next.worker_pools)) next.worker_pools = D.settings.worker_pools;
+    if (next.worker_pools.length > 0) {
+      next.workers = next.worker_pools.reduce((sum, pool) => sum + Number(pool.workers), 0);
+    }
+    Object.assign(D.settings, next);
+    return next;
+  }
   if (path === "/settings/basic-auth" && m === "GET") return { enabled: false, username: "", password_set: false };
   if (path === "/settings/basic-auth" && m === "PUT")
     throw new Error("演示模式不支持修改 HTTP Basic Auth，请在实际部署中配置");
@@ -2467,7 +2475,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const from = q.get("from") || "";
     const to = q.get("to") || "";
     if (status && !["pending", "allowed", "denied", "timeout"].includes(status)) throw new Error("无效审批状态");
-    if (decisionSource && !["model", "rule", "manual", "unknown"].includes(decisionSource)) throw new Error("无效判定来源");
+    if (decisionSource && !["model", "rule", "manual", "unknown"].includes(decisionSource))
+      throw new Error("无效判定来源");
     if ([...search].length > 200) throw new Error("搜索关键词不能超过 200 个字符");
     if (search.startsWith("#") && !/^#[1-9]\d*$/.test(search)) throw new Error("审批编号必须为 # 后接正整数");
     for (const value of [from, to]) {
