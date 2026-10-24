@@ -196,15 +196,25 @@ function FindingMergeSuggestionCard({
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const ids = Array.isArray(s.finding_ids) && s.finding_ids.length > 0 ? s.finding_ids : [s.left_id, s.right_id];
+  const ids = React.useMemo(
+    () => (Array.isArray(s.finding_ids) && s.finding_ids.length > 0 ? s.finding_ids : [s.left_id, s.right_id]),
+    [s.finding_ids, s.left_id, s.right_id],
+  );
   const [excluded, setExcluded] = React.useState<string[]>([]);
-  const included = ids.filter((id) => !excluded.includes(id));
+  React.useEffect(() => {
+    setExcluded((current) => {
+      const next = current.filter((id) => ids.includes(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [ids]);
+  const validExcluded = excluded.filter((id) => ids.includes(id));
+  const included = ids.filter((id) => !validExcluded.includes(id));
   async function resolve(accept: boolean) {
     if (busy) return;
     if (accept && included.length < 2) return;
     setBusy(true);
     try {
-      await onResolve(s, accept, accept ? excluded : []);
+      await onResolve(s, accept, accept ? validExcluded : []);
     } finally {
       setBusy(false);
     }
@@ -294,13 +304,20 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
   const taskKey = taskId ?? "";
   const taskKeyRef = React.useRef(taskKey);
   taskKeyRef.current = taskKey;
+  const previousTaskKey = React.useRef(taskKey);
+  React.useEffect(() => {
+    if (previousTaskKey.current === taskKey) return;
+    previousTaskKey.current = taskKey;
+    setSuggestions([]);
+    setRuns([]);
+    setError("");
+  }, [taskKey]);
   React.useEffect(() => {
     const seq = ++requestSeq.current;
     const requestedTask = taskKey;
     void reload;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    setSuggestions([]);
     async function load() {
       try {
         const [s, r] = await Promise.all([api.findingCaseSuggestions(taskId), api.findingCaseReviewRuns()]);
@@ -328,18 +345,23 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
     const requestedTask = taskKey;
     try {
       const result = await api.resolveFindingCaseSuggestion(s.id, accept, excludeIds);
-      if (seq !== requestSeq.current || requestedTask !== taskKeyRef.current) return;
-      setSuggestions((v) => v.filter((x) => x.id !== s.id));
-      setReload((v) => v + 1);
-      if (accept && result.case_id !== "0") {
-        toast.success("已归并，请进入文件夹生成统一报告");
-      } else {
-        toast.success("已否决，不会自动再次归并");
+      if (requestedTask === taskKeyRef.current) {
+        setReload((v) => v + 1);
+        if (seq === requestSeq.current) {
+          setSuggestions((v) => v.filter((x) => x.id !== s.id));
+          if (accept && result.case_id !== "0") {
+            toast.success("已归并，请进入文件夹生成统一报告");
+          } else {
+            toast.success("已否决，不会自动再次归并");
+          }
+          onChange?.();
+        }
       }
-      onChange?.();
     } catch (e) {
-      if (seq === requestSeq.current && requestedTask === taskKeyRef.current) setReload((v) => v + 1);
-      toast.error((e as Error).message);
+      if (requestedTask === taskKeyRef.current) {
+        setReload((v) => v + 1);
+        if (seq === requestSeq.current) toast.error((e as Error).message);
+      }
     }
   }
   return (

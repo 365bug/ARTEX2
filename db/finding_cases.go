@@ -209,6 +209,7 @@ func (d *DB) mergeFindingCase(ctx context.Context, taskID int64, ids []int64, ti
 	if strings.TrimSpace(title) == "" || strings.TrimSpace(reason) == "" {
 		return 0, errors.New("必须提供漏洞名称及基于证据的归并理由")
 	}
+	keptIDs := append([]int64(nil), ids...)
 	var cid int64
 	err = d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
 		if err := lockCaseTask(tx, taskID); err != nil {
@@ -313,7 +314,7 @@ func (d *DB) mergeFindingCase(ctx context.Context, taskID int64, ids []int64, ti
 			if all[excluded] {
 				return fmt.Errorf("排除的记录 #%d 已与所选记录在同一文件夹，请先移出该文件夹后再确认", excluded)
 			}
-			for _, kept := range ids {
+			for _, kept := range keptIDs {
 				if _, err := tx.Exec(`INSERT INTO finding_case_blocks(left_id,right_id,reason)
                     VALUES(LEAST($1::bigint,$2::bigint),GREATEST($1::bigint,$2::bigint),'人工确认分组时排除')
                     ON CONFLICT DO NOTHING`, excluded, kept); err != nil {
@@ -338,23 +339,30 @@ func sweepFindingCaseSuggestions(tx *sql.Tx, taskID int64) error {
 	if _, err := tx.Exec(`UPDATE finding_case_suggestions s SET state='accepted'
         WHERE s.task_id=$1 AND s.state='pending'
           AND (SELECT count(*) FROM finding_case_suggestion_members sm
+               WHERE sm.suggestion_id=s.id
+                 AND EXISTS (SELECT 1 FROM findings f WHERE f.id=sm.finding_id AND f.task_id=s.task_id)) >= 2
+          AND (SELECT count(*) FROM finding_case_suggestion_members sm
                JOIN findings f ON f.id=sm.finding_id AND f.task_id=s.task_id
                JOIN finding_case_members cm ON cm.finding_id=sm.finding_id
-               JOIN finding_cases c ON c.id=cm.case_id AND c.active) >= 2
+               JOIN finding_cases c ON c.id=cm.case_id AND c.active
+               WHERE sm.suggestion_id=s.id) >= 2
           AND (SELECT count(DISTINCT cm.case_id) FROM finding_case_suggestion_members sm
                JOIN findings f ON f.id=sm.finding_id AND f.task_id=s.task_id
                JOIN finding_case_members cm ON cm.finding_id=sm.finding_id
-               JOIN finding_cases c ON c.id=cm.case_id AND c.active) = 1
+               JOIN finding_cases c ON c.id=cm.case_id AND c.active
+               WHERE sm.suggestion_id=s.id) = 1
           AND NOT EXISTS (SELECT 1 FROM finding_case_suggestion_members sm
                           JOIN findings f ON f.id=sm.finding_id AND f.task_id=s.task_id
                           LEFT JOIN finding_case_members cm ON cm.finding_id=sm.finding_id
-                          WHERE cm.finding_id IS NULL)`, taskID); err != nil {
+                          LEFT JOIN finding_cases c ON c.id=cm.case_id AND c.active
+                          WHERE sm.suggestion_id=s.id AND c.id IS NULL)`, taskID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`UPDATE finding_case_suggestions s SET state='obsolete'
         WHERE s.task_id=$1 AND s.state='pending' AND (
           (SELECT count(*) FROM finding_case_suggestion_members sm
-           JOIN findings f ON f.id=sm.finding_id AND f.task_id=s.task_id) < 2
+           JOIN findings f ON f.id=sm.finding_id AND f.task_id=s.task_id
+           WHERE sm.suggestion_id=s.id) < 2
           OR EXISTS (SELECT 1
                     FROM finding_case_suggestion_members a
                     JOIN finding_case_suggestion_members b

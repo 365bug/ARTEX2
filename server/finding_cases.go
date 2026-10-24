@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -264,7 +265,7 @@ func (s *Server) findingCaseTools() []actool.CoreTool {
 		name, desc string
 		required   []string
 	}{
-		{"search_finding_duplicates", "只读检索同任务候选摘要与资产，按分数排序并返回 score、tier、hit_reasons：strong=同漏洞类型且资产重叠，weak=单一条件命中仅作参考。等级不同也可能重复。支持分页，按需读取详情。", []string{"finding_id"}},
+		{"search_finding_duplicates", "只读检索同任务候选摘要与资产，按分数排序并返回 score、tier、hit_reasons：strong=同漏洞类型且资产重叠，weak=未同时具备同漏洞类型和资产重叠，请结合 hit_reasons 核对，仅作参考。等级不同也可能重复。支持分页，按需读取详情。", []string{"finding_id"}},
 		{"get_finding_record", "读取独立漏洞完整原始证据和报告，返回探索节点编号以便追溯执行记录。", []string{"finding_id"}},
 		{"merge_finding_records", "证据明确证明同一缺陷时归并；保留所有原始记录。不跨任务、不改变原评级，不可绕过人工否决。", []string{"task_id", "finding_ids", "title", "reason"}},
 		{"suggest_finding_merge", "证据存在具体共同点但缺少关键证据时，提交一个疑似重复分组（2..20 条同任务记录，一次覆盖全部疑似成员，不要拆成两两建议），待人工确认；不是自动合并。仅类型/资产相同不应提交。", []string{"task_id", "finding_ids", "title", "reason"}},
@@ -325,7 +326,7 @@ func (s *Server) performFindingCaseTool(ctx context.Context, name string, a find
 		}
 		items, total, strongTotal, err := s.m.pg.FindingCaseCandidates(fid, page, 20, scopes...)
 		return map[string]any{"items": items, "total": total, "strong_total": strongTotal, "page": page, "page_size": 20,
-			"note": "按分数排序；weak 为单一条件命中，仅作参考，通常不应据此建议归并"}, err
+			"note": "按分数排序；weak 表示未同时具备同漏洞类型和资产重叠，请结合 hit_reasons 核对，仅作参考，通常不应据此建议归并"}, err
 	case "get_finding_record":
 		f, err := s.m.pg.GetFinding(fid)
 		if err != nil {
@@ -390,7 +391,7 @@ func (s *Server) seedFindingCaseTools() {
 	if err != nil || a == nil {
 		return
 	}
-	const flag = "finding_case_tools_v2_review"
+	const flag = "finding_case_tools_v3_review"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -398,6 +399,9 @@ func (s *Server) seedFindingCaseTools() {
 	previous, _, _ := s.m.pg.GetSetting("finding_case_tools_v1")
 	for _, t := range s.findingCaseTools() {
 		schema, _ := json.Marshal(t.InputSchema())
+		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
+			log.Printf("[finding-cases] refresh %s schema failed: %v", t.Name(), err)
+		}
 		if err := s.m.pg.SeedTool(t.Name(), t.Description(), schema, json.RawMessage(`["reporter"]`)); err != nil {
 			return
 		}

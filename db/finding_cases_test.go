@@ -388,6 +388,32 @@ func TestFindingCaseSuggestionClusterLifecycle(t *testing.T) {
 	}
 }
 
+func TestFindingCaseSuggestionSweepScopesEachCard(t *testing.T) {
+	d, task, ids := caseTestDB(t)
+	ctx := context.Background()
+	first, err := d.SuggestFindingCase(ctx, task.ID, ids[:2], "first", "first group")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := d.SuggestFindingCase(ctx, task.ID, ids[2:], "second", "second group")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.MergeFindingCase(ctx, task.ID, ids[:2], "first", "same root cause", "human"); err != nil {
+		t.Fatal(err)
+	}
+	var firstState, secondState string
+	if err := d.QueryRow(`SELECT state FROM finding_case_suggestions WHERE id=$1`, first).Scan(&firstState); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT state FROM finding_case_suggestions WHERE id=$1`, second).Scan(&secondState); err != nil {
+		t.Fatal(err)
+	}
+	if firstState != "accepted" || secondState != "pending" {
+		t.Fatalf("suggestion states first=%q second=%q", firstState, secondState)
+	}
+}
+
 func TestFindingCaseSuggestionSubsetSuperseded(t *testing.T) {
 	d, task, ids := caseTestDB(t)
 	ctx := context.Background()
@@ -424,6 +450,31 @@ func TestFindingCaseSuggestionAcceptExclusionAndReject(t *testing.T) {
 	}
 	if cid, _ := d.FindingCaseID(ids[2]); cid != 0 {
 		t.Fatalf("excluded member entered case %d", cid)
+	}
+}
+
+func TestFindingCaseSuggestionExclusionBlocksOnlyKeptSuggestionMembers(t *testing.T) {
+	d, task, ids := caseTestDB(t)
+	ctx := context.Background()
+	if _, err := d.MergeFindingCase(ctx, task.ID, ids[:2], "existing folder", "same root cause", "human"); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[0], ids[2], ids[3]}, "orders", "same component")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ResolveFindingCaseSuggestion(ctx, sid, true, []int64{ids[3]}); err != nil {
+		t.Fatal(err)
+	}
+	var folderMateBlock, keptBlock int
+	if err := d.QueryRow(`SELECT count(*) FROM finding_case_blocks WHERE left_id=$1 AND right_id=$2`, ids[1], ids[3]).Scan(&folderMateBlock); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT count(*) FROM finding_case_blocks WHERE left_id=$1 AND right_id=$2`, ids[0], ids[3]).Scan(&keptBlock); err != nil {
+		t.Fatal(err)
+	}
+	if folderMateBlock != 0 || keptBlock != 1 {
+		t.Fatalf("exclusion blocks folder mate=%d kept=%d", folderMateBlock, keptBlock)
 	}
 }
 
