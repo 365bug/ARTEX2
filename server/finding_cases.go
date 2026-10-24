@@ -267,7 +267,7 @@ func (s *Server) findingCaseTools() []actool.CoreTool {
 		{"search_finding_duplicates", "只读检索同任务候选摘要与资产，按分数排序并返回 score、tier、hit_reasons：strong=同漏洞类型且资产重叠，weak=单一条件命中仅作参考。等级不同也可能重复。支持分页，按需读取详情。", []string{"finding_id"}},
 		{"get_finding_record", "读取独立漏洞完整原始证据和报告，返回探索节点编号以便追溯执行记录。", []string{"finding_id"}},
 		{"merge_finding_records", "证据明确证明同一缺陷时归并；保留所有原始记录。不跨任务、不改变原评级，不可绕过人工否决。", []string{"task_id", "finding_ids", "title", "reason"}},
-		{"suggest_finding_merge", "证据存在具体共同点但缺少关键证据时，提交一个疑似重复分组（2..N 条同任务记录，一次覆盖全部疑似成员，不要拆成两两建议），待人工确认；不是自动合并。仅类型/资产相同不应提交。", []string{"task_id", "finding_ids", "title", "reason"}},
+		{"suggest_finding_merge", "证据存在具体共同点但缺少关键证据时，提交一个疑似重复分组（2..20 条同任务记录，一次覆盖全部疑似成员，不要拆成两两建议），待人工确认；不是自动合并。仅类型/资产相同不应提交。", []string{"task_id", "finding_ids", "title", "reason"}},
 		{"get_finding_case", "读取归并组和成员分页。先记录version，再读取成员的原报告、证据及流量；版本变化必须重新读取。", []string{"case_id"}},
 		{"update_finding_case_report", "保存统一报告及评级理由，version必须来自实际读取。保留各条原报告，不新建漏洞。", []string{"case_id", "version", "title", "report", "severity", "severity_reason"}},
 	}

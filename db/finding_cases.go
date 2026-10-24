@@ -530,6 +530,7 @@ func (d *DB) SuggestFindingCase(ctx context.Context, taskID int64, findingIDs []
 			want[fid] = true
 		}
 		superseded := []int64{}
+		var exact, covering int64
 		for _, g := range groups {
 			inNew := 0
 			for fid := range g.members {
@@ -539,21 +540,34 @@ func (d *DB) SuggestFindingCase(ctx context.Context, taskID int64, findingIDs []
 			}
 			switch {
 			case inNew == len(ids) && len(g.members) == len(ids):
-				id = g.id
-				_, err := tx.Exec(`UPDATE finding_case_suggestions SET title=$2,reason=$3 WHERE id=$1`, g.id, title, reason)
-				return err
+				if exact == 0 {
+					exact = g.id
+				} else {
+					superseded = append(superseded, g.id)
+				}
 			case inNew == len(ids):
 				// An existing pending group already covers every requested record.
-				id = g.id
-				return nil
+				if covering == 0 {
+					covering = g.id
+				}
 			case inNew == len(g.members):
 				superseded = append(superseded, g.id)
 			}
 		}
+		// Strict subsets are superseded on every path, including refresh/reuse.
 		for _, sid := range superseded {
 			if _, err := tx.Exec(`UPDATE finding_case_suggestions SET state='superseded' WHERE id=$1 AND state='pending'`, sid); err != nil {
 				return err
 			}
+		}
+		if exact > 0 {
+			id = exact
+			_, err := tx.Exec(`UPDATE finding_case_suggestions SET title=$2,reason=$3 WHERE id=$1`, exact, title, reason)
+			return err
+		}
+		if covering > 0 {
+			id = covering
+			return nil
 		}
 		if err := tx.QueryRow(`INSERT INTO finding_case_suggestions(task_id,left_id,right_id,title,reason) VALUES($1,$2,$3,$4,$5) RETURNING id`, taskID, ids[0], ids[1], title, reason).Scan(&id); err != nil {
 			return err
@@ -653,9 +667,14 @@ func (d *DB) ResolveFindingCaseSuggestion(ctx context.Context, id int64, accept 
 		if err != nil {
 			return err
 		}
+		// Pairs already sharing a folder are not vetoed: the folder is the newer human
+		// decision, and a block inside it would make every later merge into it fail.
+		// Splitting a folder goes through RemoveFindingCaseMember instead.
 		for i := range current {
 			for j := i + 1; j < len(current); j++ {
-				if _, err := tx.Exec(`INSERT INTO finding_case_blocks(left_id,right_id,reason) VALUES($1,$2,'人工否决') ON CONFLICT DO NOTHING`, current[i], current[j]); err != nil {
+				if _, err := tx.Exec(`INSERT INTO finding_case_blocks(left_id,right_id,reason) SELECT $1::bigint,$2::bigint,'人工否决'
+                    WHERE NOT EXISTS(SELECT 1 FROM finding_case_members a JOIN finding_case_members b ON a.case_id=b.case_id WHERE a.finding_id=$1 AND b.finding_id=$2)
+                    ON CONFLICT DO NOTHING`, current[i], current[j]); err != nil {
 					return err
 				}
 			}

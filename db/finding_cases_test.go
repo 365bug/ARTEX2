@@ -502,3 +502,63 @@ func TestFindingCaseClusterExclusionCannotBePulledInByFolder(t *testing.T) {
 		t.Fatal("failed exclusion was not rolled back")
 	}
 }
+
+func TestFindingCaseClusterRejectKeepsExistingFolderMergeable(t *testing.T) {
+	d, task, ids := caseTestDB(t)
+	ctx := context.Background()
+	cid, err := d.MergeFindingCase(ctx, task.ID, ids[:2], "orders", "proof", "reporter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[:3], "orders", "shared handler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ResolveFindingCaseSuggestion(ctx, sid, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	var inFolder int
+	if err := d.QueryRow(`SELECT count(*) FROM finding_case_blocks WHERE left_id=$1 AND right_id=$2`, ids[0], ids[1]).Scan(&inFolder); err != nil || inFolder != 0 {
+		t.Fatalf("co-membered pair vetoed: %d %v", inFolder, err)
+	}
+	if _, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[0], ids[2]}, "x", "x", "reporter"); err == nil {
+		t.Fatal("rejected pair merged")
+	}
+	if got, err := d.MergeFindingCase(ctx, task.ID, []int64{ids[1], ids[3]}, "orders", "proof", "reporter"); err != nil || got != cid {
+		t.Fatalf("folder poisoned by reject: %d %v", got, err)
+	}
+}
+
+func TestFindingCaseClusterSurvivesAnchorDeletion(t *testing.T) {
+	d, task, ids := caseTestDB(t)
+	ctx := context.Background()
+	sid, err := d.SuggestFindingCase(ctx, task.ID, ids[:3], "orders", "shared handler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.DeleteFinding(ids[0]); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	list, err := d.FindingCaseSuggestions(task.ID)
+	if err != nil || len(list) != 1 || list[0].ID != sid || !reflect.DeepEqual(list[0].FindingIDs, []string{fmt.Sprint(ids[1]), fmt.Sprint(ids[2])}) {
+		t.Fatalf("group lost with its anchor: %+v %v", list, err)
+	}
+	if list[0].LeftID != ids[1] || list[0].RightID != ids[2] {
+		t.Fatalf("anchors not moved: %+v", list[0])
+	}
+	if cid, err := d.ResolveFindingCaseSuggestion(ctx, sid, true, nil); err != nil || cid == 0 {
+		t.Fatal(cid, err)
+	}
+	// Deleting below two members still drops the pair through the cascade.
+	pair, err := d.SuggestFindingCase(ctx, task.ID, []int64{ids[2], ids[3]}, "orders", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DeleteFinding(ids[3]); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := d.QueryRow(`SELECT count(*) FROM finding_case_suggestions WHERE id=$1`, pair).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("two-member group kept after anchor deletion: %d %v", n, err)
+	}
+}

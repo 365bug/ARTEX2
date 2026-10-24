@@ -196,7 +196,7 @@ function FindingMergeSuggestionCard({
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const ids = s.finding_ids?.length ? s.finding_ids : [s.left_id, s.right_id];
+  const ids = s.finding_ids.length ? s.finding_ids : [s.left_id, s.right_id];
   const [excluded, setExcluded] = React.useState<string[]>([]);
   const included = ids.filter((id) => !excluded.includes(id));
   async function resolve(accept: boolean) {
@@ -224,7 +224,7 @@ function FindingMergeSuggestionCard({
                 disabled={busy}
                 onCheckedChange={(v) =>
                   setExcluded((old) =>
-                    v === true ? old.filter((x) => x !== id) : old.includes(id) ? old : [...old, id],
+                    v === true ? old.filter((x) => x !== id) : [...old.filter((x) => x !== id), id],
                   )
                 }
                 aria-label={`归并时包含上报 #${id}`}
@@ -295,14 +295,20 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
   const [suggestions, setSuggestions] = React.useState<FindingCaseSuggestion[]>([]);
   const [runs, setRuns] = React.useState<FindingCaseReviewRun[]>([]);
   const [error, setError] = React.useState("");
+  // Only the newest suggestions request (poll or post-resolve refresh) may write the list,
+  // so an older response cannot bring back a resolved group or another task's list.
+  const listSeq = React.useRef(0);
+  const currentTask = React.useRef(taskId);
+  currentTask.current = taskId;
   React.useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     async function load() {
+      const seq = ++listSeq.current;
       try {
         const [s, r] = await Promise.all([api.findingCaseSuggestions(taskId), api.findingCaseReviewRuns()]);
         if (active) {
-          setSuggestions(s);
+          if (seq === listSeq.current) setSuggestions(s);
           setRuns(r.filter((x) => !taskId || x.task_id === taskId));
           setError("");
         }
@@ -321,12 +327,18 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
   async function resolve(s: FindingCaseSuggestion, accept: boolean, excludeIds: string[] = []) {
     try {
       const result = await api.resolveFindingCaseSuggestion(s.id, accept, excludeIds);
-      setSuggestions((v) => v.filter((x) => x.id !== s.id));
-      // Server-side resolution may also clear related groups; refresh instead of waiting for the poll.
-      api
-        .findingCaseSuggestions(taskId)
-        .then(setSuggestions)
-        .catch(() => undefined);
+      // A resolve that finishes after switching tasks must not touch the new task's list.
+      if (currentTask.current === taskId) {
+        const seq = ++listSeq.current;
+        setSuggestions((v) => v.filter((x) => x.id !== s.id));
+        // Server-side resolution may also clear related groups; refresh instead of waiting for the poll.
+        api
+          .findingCaseSuggestions(taskId)
+          .then((v) => {
+            if (seq === listSeq.current && currentTask.current === taskId) setSuggestions(v);
+          })
+          .catch(() => undefined);
+      }
       if (accept && result.case_id !== "0") {
         toast.success("已归并，请进入文件夹生成统一报告");
       } else {
