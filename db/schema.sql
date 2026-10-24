@@ -1488,6 +1488,17 @@ CREATE TABLE IF NOT EXISTS finding_case_suggestions (
     UNIQUE(left_id,right_id),
     CHECK(left_id < right_id)
 );
+ALTER TABLE finding_case_suggestions DROP CONSTRAINT IF EXISTS finding_case_suggestions_left_id_right_id_key;
+CREATE TABLE IF NOT EXISTS finding_case_suggestion_members (
+ suggestion_id BIGINT NOT NULL REFERENCES finding_case_suggestions(id) ON DELETE CASCADE,
+ finding_id BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+ PRIMARY KEY(suggestion_id,finding_id)
+);
+CREATE INDEX IF NOT EXISTS finding_case_suggestion_members_finding_idx ON finding_case_suggestion_members(finding_id);
+INSERT INTO finding_case_suggestion_members(suggestion_id,finding_id)
+ SELECT id,left_id FROM finding_case_suggestions ON CONFLICT DO NOTHING;
+INSERT INTO finding_case_suggestion_members(suggestion_id,finding_id)
+ SELECT id,right_id FROM finding_case_suggestions ON CONFLICT DO NOTHING;
 -- Rejected/detached pairs are a durable human veto, also checked on group unions.
 CREATE TABLE IF NOT EXISTS finding_case_blocks (
     left_id BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,

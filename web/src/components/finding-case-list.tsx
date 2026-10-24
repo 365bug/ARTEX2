@@ -192,15 +192,18 @@ function FindingMergeSuggestionCard({
   onResolve,
 }: {
   suggestion: FindingCaseSuggestion;
-  onResolve: (s: FindingCaseSuggestion, accept: boolean) => Promise<void>;
+  onResolve: (s: FindingCaseSuggestion, accept: boolean, excludeIds?: string[]) => Promise<void>;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const ids = s.finding_ids?.length ? s.finding_ids : [s.left_id, s.right_id];
+  const [excluded, setExcluded] = React.useState<string[]>([]);
+  const included = ids.filter((id) => !excluded.includes(id));
   async function resolve(accept: boolean) {
     if (busy) return;
     setBusy(true);
     try {
-      await onResolve(s, accept);
+      await onResolve(s, accept, accept ? excluded : []);
     } finally {
       setBusy(false);
     }
@@ -209,17 +212,37 @@ function FindingMergeSuggestionCard({
     <Card size="sm" className="min-w-0">
       <CardHeader>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">疑似重复 · 待确认</Badge>
+          <Badge variant="outline">疑似重复分组 · {ids.length} 条 · 待确认</Badge>
           <CardDescription>任务 #{s.task_id}</CardDescription>
         </div>
         <CardTitle className="break-words">{s.title}</CardTitle>
-        <CardDescription className="flex flex-wrap gap-3">
-          <Link className="underline underline-offset-4" href={`/function/findings/detail/?id=${s.left_id}`}>
-            查看原报告 #{s.left_id}
-          </Link>
-          <Link className="underline underline-offset-4" href={`/function/findings/detail/?id=${s.right_id}`}>
-            查看原报告 #{s.right_id}
-          </Link>
+        <CardDescription className="flex flex-col gap-1">
+          {ids.map((id) => (
+            <span key={id} className="flex items-center gap-2">
+              <Checkbox
+                checked={!excluded.includes(id)}
+                disabled={busy}
+                onCheckedChange={(v) =>
+                  setExcluded((old) =>
+                    v === true ? old.filter((x) => x !== id) : old.includes(id) ? old : [...old, id],
+                  )
+                }
+                aria-label={`归并时包含上报 #${id}`}
+              />
+              <Link
+                className={cn(
+                  "underline underline-offset-4",
+                  excluded.includes(id) && "text-muted-foreground line-through",
+                )}
+                href={`/function/findings/detail/?id=${id}`}
+              >
+                查看原报告 #{id}
+              </Link>
+            </span>
+          ))}
+          {excluded.length > 0 ? (
+            <span className="text-xs">已排除 {excluded.length} 条：确认后这些记录不会再与本组建议归并</span>
+          ) : null}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -238,11 +261,12 @@ function FindingMergeSuggestionCard({
         </Collapsible>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => resolve(true)}>
-          {busy ? <Spinner /> : null}确认归并
+        <Button variant="outline" size="sm" disabled={busy || included.length < 2} onClick={() => resolve(true)}>
+          {busy ? <Spinner /> : null}
+          {included.length === ids.length ? "整组确认归并" : `确认归并所选（${included.length} 条）`}
         </Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => resolve(false)}>
-          不是同一漏洞
+          整组不是同一漏洞
         </Button>
       </CardFooter>
     </Card>
@@ -294,10 +318,15 @@ export function FindingCaseReviewPanel({ taskId, onChange }: { taskId?: string; 
       clearTimeout(timer);
     };
   }, [taskId]);
-  async function resolve(s: FindingCaseSuggestion, accept: boolean) {
+  async function resolve(s: FindingCaseSuggestion, accept: boolean, excludeIds: string[] = []) {
     try {
-      const result = await api.resolveFindingCaseSuggestion(s.id, accept);
+      const result = await api.resolveFindingCaseSuggestion(s.id, accept, excludeIds);
       setSuggestions((v) => v.filter((x) => x.id !== s.id));
+      // Server-side resolution may also clear related groups; refresh instead of waiting for the poll.
+      api
+        .findingCaseSuggestions(taskId)
+        .then(setSuggestions)
+        .catch(() => undefined);
       if (accept && result.case_id !== "0") {
         toast.success("已归并，请进入文件夹生成统一报告");
       } else {
