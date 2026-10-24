@@ -462,9 +462,17 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	proxyStr := strings.TrimSpace(spec.Proxy)
 	var caFile string
 	if spec.UseRecordingProxy {
-		if addr := s.m.ProxyAddr(); addr != "" {
-			proxyStr = "http://" + addr
-			caFile = s.m.ProxyCACert()
+		// ProxyAddr is the local MITM address while capture is enabled, but
+		// returns the configured global proxy URL when capture is off. Keep the
+		// latter as a complete URL (including socks5:// and credentials) instead
+		// of prepending http:// to it.
+		if s.m.TrafficEnabled() {
+			if addr := s.m.ProxyAddr(); addr != "" {
+				proxyStr = "http://" + addr
+				caFile = s.m.ProxyCACert()
+			}
+		} else if global := strings.TrimSpace(s.m.GlobalProxy()); global != "" {
+			proxyStr = global
 		}
 	}
 	if proxyStr == "" {
@@ -474,6 +482,9 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 	if err != nil {
 		return nil
 	}
+	// Go 1.26+ supports http/https/socks5/socks5h in ProxyURL directly,
+	// including proxy userinfo. Keep one code path so existing HTTP tool
+	// behavior and proxy authentication remain unchanged.
 	tr := &http.Transport{Proxy: http.ProxyURL(pu)}
 	if caFile != "" {
 		if pem, err := os.ReadFile(caFile); err == nil {
