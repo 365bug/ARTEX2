@@ -241,9 +241,10 @@ func (s *Server) repeaterTransport(useRecordingProxy, insecure bool) http.RoundT
 		transport.DialTLSContext = nil
 		transport.DialTLS = nil
 		transport.Dial = nil
+		// Let the request context enforce timeout_ms for the entire dial.
 		transport.DialContext = (&net.Dialer{
-			Timeout: 15 * time.Second, KeepAlive: 30 * time.Second,
-			Control: repeaterBlockSensitiveDial,
+			KeepAlive: 30 * time.Second,
+			Control:   repeaterBlockSensitiveDial,
 		}).DialContext
 	}
 	if insecure {

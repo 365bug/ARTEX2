@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/artex/traffic"
 )
@@ -116,6 +119,45 @@ func TestRepeaterBlockSensitiveDial(t *testing.T) {
 		if err := repeaterBlockSensitiveDial("tcp", address, nil); err == nil {
 			t.Errorf("repeaterBlockSensitiveDial(%q) allowed blocked address", address)
 		}
+	}
+}
+
+func TestRepeaterTransportBlocksSensitiveDial(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "")
+	tr := (&Server{}).repeaterTransport(false, false).(*http.Transport)
+	defer tr.CloseIdleConnections()
+	if tr.DialContext == nil {
+		t.Fatal("direct transport has no guarded DialContext")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := tr.DialContext(ctx, "tcp", "127.0.0.1:1")
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "拒绝访问本机/链路本地地址 127.0.0.1") {
+		t.Fatalf("dial should fail at the sensitive-address guard, got %v", err)
+	}
+}
+
+func TestRepeaterDirectHTTP2(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "1")
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("request protocol=%s, want HTTP/2", r.Proto)
+		}
+		_, _ = io.WriteString(w, "h2 response")
+	}))
+	srv.EnableHTTP2 = true
+	srv.TLS = &tls.Config{NextProtos: []string{"h2"}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	code, out, raw := repeaterTestSend(t, &Server{}, map[string]any{
+		"url": srv.URL, "use_recording_proxy": false, "insecure_skip_verify": true,
+	})
+	if code != http.StatusOK || out.Error != "" || out.Status != http.StatusOK || out.Proto != "HTTP/2.0" || out.Body != "h2 response" {
+		t.Fatalf("HTTP/2 response status=%d raw=%s", code, raw)
 	}
 }
 
@@ -263,6 +305,9 @@ func TestRepeaterProxyTransportConstruction(t *testing.T) {
 	}
 	if tr.TLSClientConfig == nil || tr.TLSClientConfig.RootCAs == nil || !tr.TLSClientConfig.RootCAs.Equal(wantRoots) {
 		t.Fatal("recording proxy CA was not loaded into transport RootCAs")
+	}
+	if s.repeaterTransport(true, false).(*http.Transport).ForceAttemptHTTP2 {
+		t.Fatal("recording proxy transport must not force HTTP/2")
 	}
 }
 
