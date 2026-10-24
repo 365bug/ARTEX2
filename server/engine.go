@@ -778,6 +778,11 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 
 func workerCountForTask(t *Task, global int) int {
 	if t != nil && t.WorkerCount > 0 {
+		// Direct database edits can bypass validation; cap those values so the
+		// engine never starts more than the supported per-task worker count.
+		if t.WorkerCount > db.MaxTaskWorkerCount {
+			return db.MaxTaskWorkerCount
+		}
 		return t.WorkerCount
 	}
 	return global

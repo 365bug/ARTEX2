@@ -143,8 +143,9 @@ const MaxTaskWorkerCount = 50
 // MaxTaskRemarkRunes is the shared limit for task and template remarks.
 const MaxTaskRemarkRunes = 2000
 
-// normalizeWorkerCount clamps a per-task worker override into [0, MaxTaskWorkerCount].
-// 0 means "use the global settings.workers default".
+// normalizeWorkerCount converts negative per-task worker overrides to 0.
+// The upper bound is enforced separately by validateWorkerCount; 0 means
+// "use the global settings.workers default".
 func normalizeWorkerCount(n int) int {
 	if n < 0 {
 		return 0

@@ -33,7 +33,7 @@ import type {
   TrafficEvidenceRole,
   TrafficEvidenceSnapshot,
 } from "../types";
-import { MAX_TASK_WORKER_COUNT } from "../types";
+import { MAX_TASK_REMARK_RUNES, MAX_TASK_WORKER_COUNT } from "../types";
 import * as D from "./data";
 
 const delay = (ms = 120) => new Promise((r) => setTimeout(r, ms));
@@ -999,6 +999,21 @@ function parseBody(body?: BodyInit | null): Record<string, unknown> {
   }
 }
 
+function mockRemark(value: unknown): string {
+  const remark = typeof value === "string" ? value.trim() : "";
+  if (Array.from(remark).length > MAX_TASK_REMARK_RUNES) {
+    throw new Error(`备注最多 ${MAX_TASK_REMARK_RUNES} 个字符`);
+  }
+  return remark;
+}
+
+function mockWorkerCount(value: unknown): number {
+  if (typeof value !== "number") return 0;
+  if (value < 0) throw new Error("Worker 运行数量不能为负数");
+  if (value > MAX_TASK_WORKER_COUNT) throw new Error(`Worker 运行数量最多 ${MAX_TASK_WORKER_COUNT}`);
+  return Math.floor(value);
+}
+
 export async function mockHandle<T>(method: string, rawPath: string, body?: BodyInit | null): Promise<T> {
   advanceMockRetests();
   await delay();
@@ -1183,12 +1198,12 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const created: Task = {
       id,
       name: String(b.name ?? ""),
-      remark: typeof b.remark === "string" ? b.remark.trim() : "",
+      remark: mockRemark(b.remark),
       category_id: category?.id,
       category_name: category?.name,
       description: String(b.description ?? "新任务"),
       goal: String(b.goal ?? ""),
-      worker_count: typeof b.worker_count === "number" ? Math.min(MAX_TASK_WORKER_COUNT, Math.max(0, Math.floor(b.worker_count))) : 0,
+      worker_count: mockWorkerCount(b.worker_count),
       status: "created",
       created_at: now.toISOString(),
       created_unix: Math.floor(now.getTime() / 1000),
@@ -1318,10 +1333,10 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       name,
       description,
       goal,
-      remark: typeof b.remark === "string" ? b.remark.trim() : "",
+      remark: mockRemark(b.remark),
       category_id: typeof b.category_id === "number" ? b.category_id : null,
       intercept_rules: Array.isArray(b.intercept_rules) ? b.intercept_rules : [],
-      worker_count: typeof b.worker_count === "number" ? Math.min(MAX_TASK_WORKER_COUNT, Math.max(0, Math.floor(b.worker_count))) : 0,
+      worker_count: mockWorkerCount(b.worker_count),
       created_at: now,
       updated_at: now,
     };
@@ -1342,13 +1357,15 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     ) {
       throw new Error("模板名称已存在");
     }
+    const remark = typeof b.remark === "string" ? mockRemark(b.remark) : template.remark;
+    const workerCount = typeof b.worker_count === "number" ? mockWorkerCount(b.worker_count) : template.worker_count;
     template.name = name;
     template.description = description;
     template.goal = goal;
-    if (typeof b.remark === "string") template.remark = b.remark.trim();
+    template.remark = remark;
     if ("category_id" in b) template.category_id = typeof b.category_id === "number" ? b.category_id : null;
     if (Array.isArray(b.intercept_rules)) template.intercept_rules = b.intercept_rules;
-    if (typeof b.worker_count === "number") template.worker_count = Math.min(MAX_TASK_WORKER_COUNT, Math.max(0, Math.floor(b.worker_count)));
+    template.worker_count = workerCount;
     template.updated_at = new Date().toISOString();
     mockTaskTemplates.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id);
     return template;

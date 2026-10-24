@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Autumn-27/artex/db"
+)
 
 func TestWorkerCountForTaskUsesOverrideOrGlobalDefault(t *testing.T) {
 	if got := workerCountForTask(&Task{WorkerCount: 5}, 3); got != 5 {
@@ -11,5 +15,8 @@ func TestWorkerCountForTaskUsesOverrideOrGlobalDefault(t *testing.T) {
 	}
 	if got := workerCountForTask(&Task{WorkerCount: -1}, 3); got != 3 {
 		t.Fatalf("negative override = %d, want global 3", got)
+	}
+	if got := workerCountForTask(&Task{WorkerCount: db.MaxTaskWorkerCount + 1}, 3); got != db.MaxTaskWorkerCount {
+		t.Fatalf("oversized override = %d, want capped %d", got, db.MaxTaskWorkerCount)
 	}
 }
