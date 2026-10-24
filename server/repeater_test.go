@@ -161,6 +161,78 @@ func TestRepeaterDirectHTTP2(t *testing.T) {
 	}
 }
 
+func TestRepeaterTLSHandshakeUsesRequestTimeout(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "1")
+	// Scale down the inherited timeout so a slow handshake can be tested
+	// without waiting for the default transport's ten-second deadline.
+	base := http.DefaultTransport
+	short := base.(*http.Transport).Clone()
+	short.TLSHandshakeTimeout = 10 * time.Millisecond
+	http.DefaultTransport = short
+	defer func() { http.DefaultTransport = base }()
+	defer short.CloseIdleConnections()
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "handshake completed")
+	}))
+	srv.TLS = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		time.Sleep(100 * time.Millisecond)
+		return nil, nil
+	}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	code, out, raw := repeaterTestSend(t, &Server{}, map[string]any{
+		"url": srv.URL, "use_recording_proxy": false, "insecure_skip_verify": true, "timeout_ms": 1000,
+	})
+	if code != http.StatusOK || out.Error != "" || out.Status != http.StatusOK || out.Body != "handshake completed" {
+		t.Fatalf("handshake within request budget failed: status=%d raw=%s", code, raw)
+	}
+}
+
+func TestRepeaterClosesIdleConnections(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "1")
+	for _, mode := range []string{"direct", "http2", "global proxy", "recording proxy fallback"} {
+		t.Run(mode, func(t *testing.T) {
+			closed := make(chan struct{}, 1)
+			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, "response")
+			}))
+			srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+				if state == http.StateClosed {
+					closed <- struct{}{}
+				}
+			}
+			if mode == "http2" {
+				srv.EnableHTTP2 = true
+				srv.StartTLS()
+			} else {
+				srv.Start()
+			}
+			defer srv.Close()
+
+			s := &Server{}
+			payload := map[string]any{"url": srv.URL, "use_recording_proxy": false, "insecure_skip_verify": true}
+			if mode == "global proxy" || mode == "recording proxy fallback" {
+				s.m = &Manager{globalProxy: srv.URL}
+				payload["url"] = "http://target.example/"
+				if mode == "recording proxy fallback" {
+					delete(payload, "use_recording_proxy")
+				}
+			}
+			code, out, raw := repeaterTestSend(t, s, payload)
+			if code != http.StatusOK || out.Error != "" || out.Status != http.StatusOK || out.Body != "response" {
+				t.Fatalf("status=%d raw=%s", code, raw)
+			}
+			select {
+			case <-closed:
+			case <-time.After(time.Second):
+				t.Fatal("connection still open after sendRepeater returned")
+			}
+		})
+	}
+}
+
 func TestRepeaterRoundTripHeadersAndBody(t *testing.T) {
 	t.Setenv(repeaterAllowLocalEnv, "1")
 	var got http.Request

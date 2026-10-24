@@ -167,6 +167,9 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 	}
+	// Each send owns its transport. Registered before Body.Close so idle
+	// connections are released after the response body, including on errors.
+	defer client.CloseIdleConnections()
 
 	started := time.Now()
 	resp, err := client.Do(req)
@@ -235,6 +238,9 @@ func (s *Server) repeaterTransport(useRecordingProxy, insecure bool) http.RoundT
 	// Keep response bytes faithful and make body_bytes match what was received;
 	// transparent gzip decompression would otherwise obscure both values.
 	transport.DisableCompression = true
+	// Use the request's timeout_ms budget instead of inherited phase deadlines.
+	transport.TLSHandshakeTimeout = 0
+	transport.ExpectContinueTimeout = 0
 	if !proxied {
 		// Clear a custom TLS dialer before installing the guarded dialer; when
 		// DialTLSContext is set, net/http bypasses DialContext entirely.

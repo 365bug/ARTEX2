@@ -67,7 +67,7 @@ export function formatHeaders(headers: Record<string, string[]> | Record<string,
 }
 
 export function buildRawResponse(response: RepeaterSendResponse): string {
-  if (!response.status && response.error) return `错误: ${response.error}`;
+  if (!response.status) return "";
   const statusLine = `${response.proto || "HTTP/1.1"} ${response.status_text || response.status}`.trim();
   const headers = formatHeaders(response.headers);
   return `${statusLine}\n${headers}\n\n${response.body}`;
