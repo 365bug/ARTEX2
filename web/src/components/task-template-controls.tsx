@@ -33,7 +33,14 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { MAX_TASK_REMARK_RUNES, MAX_TASK_WORKER_COUNT, type AssetInterceptRuleInput, type TaskCategory, type TaskTemplate } from "@/lib/types";
+import {
+  MAX_TASK_REMARK_RUNES,
+  MAX_TASK_WORKER_COUNT,
+  parseWorkerCountInput,
+  type AssetInterceptRuleInput,
+  type TaskCategory,
+  type TaskTemplate,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface TemplateDraft {
@@ -149,13 +156,18 @@ function TaskTemplateManager({
   };
 
   async function save() {
+    const workerCount = parseWorkerCountInput(draft.workerCount);
+    if (workerCount == null) {
+      toast.error(`Worker 运行数量必须是 0-${MAX_TASK_WORKER_COUNT} 的整数`);
+      return;
+    }
     const input = {
       name: draft.name.trim(),
       description: draft.description.trim(),
       goal: draft.goal.trim(),
       remark: draft.remark.trim(),
       category_id: draft.categoryID,
-      worker_count: Math.min(MAX_TASK_WORKER_COUNT, Math.max(0, Math.floor(Number(draft.workerCount) || 0))),
+      worker_count: workerCount,
       intercept_rules: draft.interceptRules
         .map((r) => ({ ...r, pattern: r.pattern.trim() }))
         .filter((r) => r.pattern !== ""),

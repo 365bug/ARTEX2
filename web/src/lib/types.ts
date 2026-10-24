@@ -8,6 +8,18 @@ export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 export const MAX_TASK_REMARK_RUNES = 2000;
 export const MAX_TASK_WORKER_COUNT = 50;
 
+// Parse the optional worker-count input without silently changing invalid values.
+// An empty field means 0 (use the global default); every other value must be an
+// integer in the backend's accepted range.
+export function parseWorkerCountInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return 0;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return null;
+  if (parsed < 0 || parsed > MAX_TASK_WORKER_COUNT) return null;
+  return parsed;
+}
+
 export interface Task {
   distinct_findings?: FindingDistinctStats;
   id: string;

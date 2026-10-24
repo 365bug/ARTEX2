@@ -23,8 +23,8 @@ var (
 	ErrTaskTemplateNotFound     = errors.New("task template not found")
 )
 
-// TaskTemplate is a reusable task preset (description/goal + optional category
-// and task-level intercept/allow rules).
+// TaskTemplate is a reusable task preset (description/goal + optional remark,
+// worker count, category, and task-level intercept/allow rules).
 type TaskTemplate struct {
 	ID             int64                    `json:"id"`
 	Name           string                   `json:"name"`

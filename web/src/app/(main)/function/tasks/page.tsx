@@ -137,7 +137,7 @@ import type {
   TaskCategory,
   TaskStatus,
 } from "@/lib/types";
-import { MAX_TASK_REMARK_RUNES, MAX_TASK_WORKER_COUNT } from "@/lib/types";
+import { MAX_TASK_REMARK_RUNES, MAX_TASK_WORKER_COUNT, parseWorkerCountInput } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // fmtBytes renders a human file size for the upload manifest.
@@ -3184,11 +3184,15 @@ function CreateTaskSheet({
       toast.error(`最多关联 ${MAX_SOURCE_TASKS} 个来源任务`);
       return;
     }
+    const workerCountNum = parseWorkerCountInput(workerCount);
+    if (workerCountNum == null) {
+      toast.error(`Worker 运行数量必须是 0-${MAX_TASK_WORKER_COUNT} 的整数`);
+      return;
+    }
     setCreating(true);
     try {
       const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
       const heartbeatSec = Math.max(10, Math.floor(Number(heartbeatMin) || 10)) * 60; // 下限 10min，与后端归一一致
-      const workerCountNum = Math.min(MAX_TASK_WORKER_COUNT, Math.max(0, Math.floor(Number(workerCount) || 0)));
       await api.createTask({
         name: name.trim(),
         remark: remark.trim(),

@@ -78,6 +78,9 @@ func validateTaskTemplateRequest(req taskTemplateRequest) error {
 			value = strings.Join(strings.Fields(value), " ")
 		}
 		if utf8.RuneCountInString(value) > check.limit {
+			if check.name == "remark" {
+				return fmt.Errorf("备注最多 %d 个字符", check.limit)
+			}
 			return fmt.Errorf("%s 最多 %d 个字符", check.name, check.limit)
 		}
 	}
