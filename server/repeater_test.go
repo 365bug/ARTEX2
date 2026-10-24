@@ -2,12 +2,16 @@ package server
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -195,12 +199,12 @@ func TestRepeaterRejectsCrossHostRedirect(t *testing.T) {
 	}
 }
 
-func TestRepeaterSocks5TransportConstruction(t *testing.T) {
+func TestRepeaterProxyTransportConstruction(t *testing.T) {
 	s := &Server{m: &Manager{}}
-	for _, scheme := range []string{"socks5", "socks5h"} {
+	for _, scheme := range []string{"http", "https", "socks5", "socks5h"} {
 		tr := s.httpProxyTransport(httpExec{Proxy: scheme + "://user:pass@127.0.0.1:1080"})
 		if tr == nil || tr.Proxy == nil {
-			t.Fatalf("%s transport not configured as SOCKS: %#v", scheme, tr)
+			t.Fatalf("%s proxy transport not configured: %#v", scheme, tr)
 		}
 		proxyURL, err := tr.Proxy(httptest.NewRequest(http.MethodGet, "https://target.example/", nil))
 		if err != nil || proxyURL == nil || proxyURL.Scheme != scheme || proxyURL.Host != "127.0.0.1:1080" {
@@ -244,5 +248,40 @@ func TestRepeaterSocks5TransportConstruction(t *testing.T) {
 	proxyURL, err = tr.Proxy(httptest.NewRequest(http.MethodGet, "https://target.example/", nil))
 	if err != nil || proxyURL == nil || proxyURL.Scheme != "http" || proxyURL.Host != "127.0.0.1:18788" {
 		t.Fatalf("recording proxy URL = %#v, err=%v", proxyURL, err)
+	}
+	caFile := s.m.ProxyCACert()
+	if caFile == "" {
+		t.Fatal("recording proxy CA path is empty")
+	}
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		t.Fatalf("read recording proxy CA: %v", err)
+	}
+	wantRoots := x509.NewCertPool()
+	if !wantRoots.AppendCertsFromPEM(caPEM) {
+		t.Fatal("recording proxy CA is not valid PEM")
+	}
+	if tr.TLSClientConfig == nil || tr.TLSClientConfig.RootCAs == nil || !tr.TLSClientConfig.RootCAs.Equal(wantRoots) {
+		t.Fatal("recording proxy CA was not loaded into transport RootCAs")
+	}
+}
+
+func TestRepeaterRedactProxyCredentials(t *testing.T) {
+	for _, scheme := range []string{"http", "https", "socks5", "socks5h"} {
+		t.Run(scheme, func(t *testing.T) {
+			proxyErr := &url.Error{
+				Op: "proxyconnect", URL: scheme + "://proxy-user:proxy-secret@127.0.0.1:1080",
+				Err: errors.New("connection refused"),
+			}
+			for _, err := range []error{proxyErr, fmt.Errorf("send request: %w", proxyErr)} {
+				got := repeaterRedactError(err)
+				if strings.Contains(got, "proxy-secret") || strings.Contains(got, "proxy-user") {
+					t.Fatalf("proxy credentials leaked: %q", got)
+				}
+				if got != "proxyconnect 127.0.0.1:1080: connection refused" {
+					t.Fatalf("unexpected redacted error: %q", got)
+				}
+			}
+		})
 	}
 }

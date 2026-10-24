@@ -102,12 +102,13 @@ export function FindingTrafficPanel({
     setRepeaterBusy(true);
     try {
       const detail = await api.findingTrafficDetail(findingId, bindingId, contextTask);
-      if (detail.request.truncated) toast.info("请求体为预览片段，完整正文请先下载");
+      if (detail.request.binary) toast.info("请求体为二进制，已留空；完整正文请先下载");
+      else if (detail.request.truncated) toast.info("请求体为预览片段，完整正文请先下载");
       setRepeaterInitial({
         method: detail.binding.snapshot.method || "GET",
         url: detail.binding.snapshot.url || "",
         headersText: headersFromReqHead(detail.binding.snapshot.req_head),
-        body: detail.request.content || "",
+        body: detail.request.binary ? "" : detail.request.content || "",
       });
       setRepeaterOpen(true);
     } catch (e) {

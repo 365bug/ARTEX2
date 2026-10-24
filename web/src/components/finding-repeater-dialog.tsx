@@ -110,24 +110,40 @@ export function FindingRepeaterDialog({
   const [response, setResponse] = React.useState<RepeaterSendResponse | null>(null);
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const sequence = React.useRef(0);
+  const generation = React.useRef(0);
+  const sending = React.useRef(false);
 
   React.useEffect(() => {
+    sending.current = false;
+    setBusy(false);
     if (!open) return;
     const nextMethod = (initial?.method ?? "GET").toUpperCase();
     setMethod(METHODS.includes(nextMethod as (typeof METHODS)[number]) ? nextMethod : "GET");
     setURL(initial?.url ?? "");
     setHeadersText(initial?.headersText ?? "");
     setBody(initial?.body ?? "");
+    setUseProxy(true);
+    setInsecure(false);
     setResponse(null);
+    return () => {
+      // Closing, reseeding, or unmounting makes any pending result obsolete.
+      generation.current += 1;
+      sending.current = false;
+    };
   }, [open, initial?.method, initial?.url, initial?.headersText, initial?.body]);
 
   async function send() {
+    // State alone cannot stop a second click before React disables the button.
+    if (sending.current || !open) return;
     const target = url.trim();
     if (!target) {
       toast.error("请填写 URL");
       return;
     }
+    const requestGeneration = ++generation.current;
+    sending.current = true;
     setBusy(true);
+    setResponse(null);
     try {
       const result = await api.repeaterSend({
         method,
@@ -137,23 +153,38 @@ export function FindingRepeaterDialog({
         use_recording_proxy: useProxy,
         insecure_skip_verify: insecure,
       });
+      if (requestGeneration !== generation.current) return;
       setResponse(result);
-      sequence.current += 1;
+      const id = ++sequence.current;
       setHistory((previous) =>
         [
-          { id: sequence.current, method, url: target, headersText, body, useProxy, insecure, response: result },
+          { id, method, url: target, headersText, body, useProxy, insecure, response: result },
           ...previous,
         ].slice(0, 20),
       );
     } catch (error) {
-      toast.error((error as Error).message);
+      if (requestGeneration === generation.current) toast.error((error as Error).message);
     } finally {
-      setBusy(false);
+      if (requestGeneration === generation.current) {
+        sending.current = false;
+        setBusy(false);
+      }
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          // Invalidate immediately, before the parent's close render/effect.
+          generation.current += 1;
+          sending.current = false;
+          setBusy(false);
+        }
+        onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent className="flex max-h-[92vh] w-[min(1150px,96vw)] max-w-none flex-col gap-3 overflow-hidden sm:max-w-none">
         <DialogHeader>
           <DialogTitle>Repeater · 请求重放</DialogTitle>
@@ -164,7 +195,7 @@ export function FindingRepeaterDialog({
         <div className="flex flex-wrap items-end gap-2">
           <div className="w-28">
             <Label className="mb-1 block text-xs text-muted-foreground">方法</Label>
-            <Select value={method} onValueChange={setMethod}>
+            <Select value={method} onValueChange={setMethod} disabled={busy}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -182,6 +213,7 @@ export function FindingRepeaterDialog({
           <div className="min-w-[240px] flex-1">
             <Label className="mb-1 block text-xs text-muted-foreground">URL</Label>
             <Input
+              disabled={busy}
               value={url}
               onChange={(event) => setURL(event.target.value)}
               placeholder="https://target.example/path"
@@ -197,6 +229,7 @@ export function FindingRepeaterDialog({
           <Label className="flex items-center gap-2" htmlFor="repeater-use-proxy">
             <Checkbox
               id="repeater-use-proxy"
+              disabled={busy}
               checked={useProxy}
               onCheckedChange={(value) => setUseProxy(value === true)}
             />
@@ -205,6 +238,7 @@ export function FindingRepeaterDialog({
           <Label className="flex items-center gap-2" htmlFor="repeater-insecure">
             <Checkbox
               id="repeater-insecure"
+              disabled={busy}
               checked={insecure}
               onCheckedChange={(value) => setInsecure(value === true)}
             />
@@ -258,6 +292,7 @@ export function FindingRepeaterDialog({
                 <Label className="text-xs text-muted-foreground">请求头</Label>
                 <Textarea
                   className="min-h-[120px] flex-1 font-mono text-xs"
+                  disabled={busy}
                   value={headersText}
                   onChange={(event) => setHeadersText(event.target.value)}
                   placeholder="Header: value"
@@ -268,6 +303,7 @@ export function FindingRepeaterDialog({
                 <Label className="text-xs text-muted-foreground">请求体</Label>
                 <Textarea
                   className="min-h-[120px] flex-1 font-mono text-xs"
+                  disabled={busy}
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
                   placeholder="请求正文（可选）"
