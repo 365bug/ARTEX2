@@ -793,10 +793,10 @@ func (e *Engine) ReadyFor(t *Task) bool {
 // but no-op until an LLM is configured (so a task created while idle picks up
 // automatically once LLM is set from the UI).
 func (e *Engine) Run(ctx context.Context, t *Task) {
-	slots, err := ExpandWorkerSlots(e.m.WorkerPools(), e.m.Workers())
+	slots, err := workerSlotsForTask(t, e.m.WorkerPools(), e.m.Workers())
 	if err != nil {
 		log.Printf("[engine] task %s worker pool invalid, using legacy workers: %v", t.ID, err)
-		slots, _ = ExpandWorkerSlots(nil, e.m.Workers())
+		slots, _ = ExpandWorkerSlots(nil, workerCountForTask(t, e.m.Workers()))
 	}
 	e.deleteMu.RLock()
 	if e.IsDeleting(t.ID) {
@@ -830,6 +830,27 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	if has, _ := t.Store.HasActiveIntent(); !has {
 		t.Notify() // kick the first planning round (acted on once LLM is ready)
 	}
+}
+
+// workerSlotsForTask preserves an explicit task concurrency override. Tasks
+// using the global default inherit its model pools and their pinned profiles.
+func workerSlotsForTask(t *Task, pools []WorkerPool, global int) ([]WorkerSlot, error) {
+	if t != nil && t.WorkerCount > 0 {
+		return ExpandWorkerSlots(nil, workerCountForTask(t, global))
+	}
+	return ExpandWorkerSlots(pools, global)
+}
+
+func workerCountForTask(t *Task, global int) int {
+	if t != nil && t.WorkerCount > 0 {
+		// Direct database edits can bypass validation; cap those values so the
+		// engine never starts more than the supported per-task worker count.
+		if t.WorkerCount > db.MaxTaskWorkerCount {
+			return db.MaxTaskWorkerCount
+		}
+		return t.WorkerCount
+	}
+	return global
 }
 
 // plannerHeartbeatInterval 解析任务的 planner 心跳间隔。db.CreateTask 已归一
