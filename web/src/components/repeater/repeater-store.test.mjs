@@ -15,6 +15,7 @@ const {
   MAX_HISTORY,
   MAX_RESPONSE_CHARS,
   MAX_STORAGE_BYTES,
+  newId,
   seedWorkspace,
   serializeWorkspace,
   truncateResponse,
@@ -356,4 +357,39 @@ test("Host shortcut replaces case-insensitive duplicates and preserves other hea
 test("migrated HTTP helpers retain raw request and response formatting", () => {
   assert.equal(headersFromReqHead("\r\nGET / HTTP/1.1\r\nHost: example.test\r\n"), "Host: example.test");
   assert.equal(buildRawResponse(response()), "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nok");
+});
+
+test("workspace initializes and adds distinct tabs on HTTP origins without randomUUID", (t) => {
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} });
+  t.after(() => {
+    if (originalCrypto) Object.defineProperty(globalThis, "crypto", originalCrypto);
+    else delete globalThis.crypto;
+  });
+  const workspace = defaultWorkspace();
+  const updated = addTab(workspace, { url: "https://example.test/" });
+  assert.equal(updated.tabs.length, 2);
+  assert.notEqual(updated.tabs[0].id, updated.tabs[1].id);
+  assert.equal(deserializeWorkspace(null).tabs.length, 1);
+  assert.equal(new Set(Array.from({ length: 100 }, () => newId())).size, 100);
+});
+
+test("fallback IDs stay distinct without crypto even when clock and randomness repeat", (t) => {
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+  t.after(() => {
+    if (originalCrypto) Object.defineProperty(globalThis, "crypto", originalCrypto);
+    else delete globalThis.crypto;
+  });
+  t.mock.method(Date, "now", () => 1700000000000);
+  t.mock.method(Math, "random", () => 0);
+  const ids = Array.from({ length: 100 }, () => newId());
+  assert.ok(ids.every((id) => typeof id === "string" && id.length > 0));
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("secure origins retain native UUID generation", (t) => {
+  const native = t.mock.method(globalThis.crypto, "randomUUID", () => "native-uuid");
+  assert.equal(newId(), "native-uuid");
+  assert.equal(native.mock.callCount(), 1);
 });

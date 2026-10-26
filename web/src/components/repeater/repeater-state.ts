@@ -41,8 +41,14 @@ export type TabSeed = Partial<
 >;
 export type TabOptions = { groupId?: string; title?: string; activate?: boolean };
 
+let fallbackIdSequence = 0;
+
 export function newId(): string {
-  return crypto.randomUUID();
+  // Local workspace IDs must also work on HTTP LAN origins without randomUUID.
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `repeater-${Date.now().toString(36)}-${(++fallbackIdSequence).toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  );
 }
 
 export function emptyTab(groupId = DEFAULT_GROUP_ID, title = "Tab 1"): RepeaterTab {
