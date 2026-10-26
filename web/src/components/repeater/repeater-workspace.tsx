@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { RepeaterEditor } from "./repeater-editor";
+import { RepeaterHistory } from "./repeater-history";
 import { useRepeaterStore } from "./repeater-store";
 
 export function RepeaterWorkspace() {
@@ -52,10 +53,10 @@ export function RepeaterWorkspace() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-7rem)] min-h-[600px] min-w-0 flex-col gap-4 md:h-[calc(100dvh-8rem)]">
+    <div className="flex min-h-[calc(100dvh-7rem)] min-w-0 flex-col gap-4 xl:h-[calc(100dvh-8rem)] xl:min-h-[600px]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-semibold text-xl">Repeater · 请求重放</h1>
+          <h1 className="font-semibold text-xl">请求重发</h1>
           <p className="text-muted-foreground text-sm">编辑、发送并比较请求 · 草稿与近期响应保存在此浏览器</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -71,7 +72,7 @@ export function RepeaterWorkspace() {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>清空 Repeater 工作区？</AlertDialogTitle>
+                <AlertDialogTitle>清空请求重发工作区？</AlertDialogTitle>
                 <AlertDialogDescription>所有分组、标签、请求草稿和历史响应都会被删除。</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -86,84 +87,87 @@ export function RepeaterWorkspace() {
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <nav
-          aria-label="Repeater 分组和标签"
-          className="flex max-h-48 shrink-0 flex-col gap-3 overflow-y-auto rounded-md border p-2 lg:max-h-none lg:w-56"
+          aria-label="请求重发分组和标签"
+          className="flex max-h-64 min-h-0 shrink-0 flex-col gap-3 overflow-hidden rounded-md border p-2 lg:max-h-none lg:w-56"
         >
-          {workspace.groups.map((group) => (
-            <div key={group.id} className="flex flex-col gap-1">
-              <div className="flex min-w-0 items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`${group.collapsed ? "展开" : "折叠"}分组 ${group.name}`}
-                  onClick={() => store.toggleGroupCollapsed(group.id)}
-                >
-                  {group.collapsed ? <ChevronRight /> : <ChevronDown />}
-                </Button>
-                <span className="min-w-0 flex-1 truncate font-medium text-sm" title={group.name}>
-                  {group.name}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`重命名分组 ${group.name}`}
-                  onClick={() => setRename({ kind: "group", id: group.id, name: group.name })}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`新建标签 · ${group.name}`}
-                  title="新建标签"
-                  onClick={() => store.createTab({}, { groupId: group.id })}
-                >
-                  <Plus />
-                </Button>
+          <div className="max-h-32 shrink-0 overflow-y-auto lg:max-h-[45%]">
+            {workspace.groups.map((group) => (
+              <div key={group.id} className="flex flex-col gap-1">
+                <div className="flex min-w-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`${group.collapsed ? "展开" : "折叠"}分组 ${group.name}`}
+                    onClick={() => store.toggleGroupCollapsed(group.id)}
+                  >
+                    {group.collapsed ? <ChevronRight /> : <ChevronDown />}
+                  </Button>
+                  <span className="min-w-0 flex-1 truncate font-medium text-sm" title={group.name}>
+                    {group.name}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`重命名分组 ${group.name}`}
+                    onClick={() => setRename({ kind: "group", id: group.id, name: group.name })}
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`新建标签 · ${group.name}`}
+                    title="新建标签"
+                    onClick={() => store.createTab({}, { groupId: group.id })}
+                  >
+                    <Plus />
+                  </Button>
+                </div>
+                {!group.collapsed
+                  ? workspace.tabs
+                      .filter((tab) => tab.groupId === group.id)
+                      .map((tab) => (
+                        <div
+                          key={tab.id}
+                          className={cn(
+                            "flex min-w-0 items-center gap-1 rounded-md",
+                            active?.id === tab.id && "bg-accent",
+                          )}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-current={active?.id === tab.id ? "page" : undefined}
+                            className="min-w-0 flex-1 justify-start"
+                            onClick={() => store.setActiveTab(tab.id)}
+                            onDoubleClick={() => setRename({ kind: "tab", id: tab.id, name: tab.title })}
+                            title={`${tab.title}\n${tab.url}`}
+                          >
+                            <span className="truncate">{tab.title}</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`重命名标签 ${tab.title}`}
+                            onClick={() => setRename({ kind: "tab", id: tab.id, name: tab.title })}
+                          >
+                            <Pencil />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`关闭标签 ${tab.title}`}
+                            onClick={() => store.closeTab(tab.id)}
+                          >
+                            <X />
+                          </Button>
+                        </div>
+                      ))
+                  : null}
               </div>
-              {!group.collapsed
-                ? workspace.tabs
-                    .filter((tab) => tab.groupId === group.id)
-                    .map((tab) => (
-                      <div
-                        key={tab.id}
-                        className={cn(
-                          "flex min-w-0 items-center gap-1 rounded-md",
-                          active?.id === tab.id && "bg-accent",
-                        )}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          aria-current={active?.id === tab.id ? "page" : undefined}
-                          className="min-w-0 flex-1 justify-start"
-                          onClick={() => store.setActiveTab(tab.id)}
-                          onDoubleClick={() => setRename({ kind: "tab", id: tab.id, name: tab.title })}
-                          title={`${tab.title}\n${tab.url}`}
-                        >
-                          <span className="truncate">{tab.title}</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`重命名标签 ${tab.title}`}
-                          onClick={() => setRename({ kind: "tab", id: tab.id, name: tab.title })}
-                        >
-                          <Pencil />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`关闭标签 ${tab.title}`}
-                          onClick={() => store.closeTab(tab.id)}
-                        >
-                          <X />
-                        </Button>
-                      </div>
-                    ))
-                : null}
-            </div>
-          ))}
+            ))}
+          </div>
+          <RepeaterHistory tab={active} />
         </nav>
         <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
           {active ? (

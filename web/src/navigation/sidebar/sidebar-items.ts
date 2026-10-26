@@ -74,7 +74,7 @@ export const sidebarItems: NavGroup[] = [
       { id: "schedules", title: "计划任务", url: "/function/schedules", icon: CalendarClock },
       { id: "findings", title: "发现", url: "/function/findings", icon: Bug },
       { id: "traffic", title: "流量", url: "/function/traffic", icon: Activity },
-      { id: "repeater", title: "Repeater · 请求重放", url: "/function/repeater", icon: Repeat },
+      { id: "repeater", title: "请求重发", url: "/function/repeater", icon: Repeat },
       { id: "commands", title: "工具执行", url: "/function/commands", icon: Terminal },
       { id: "llm-records", title: "LLM 录制", url: "/function/llm-records", icon: Radio },
       { id: "assets", title: "资产", url: "/function/assets", icon: Network },

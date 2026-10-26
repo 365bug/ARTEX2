@@ -101,7 +101,7 @@ export function TrafficEvidenceViewer({
             </div>
             {detail ? (
               <Button variant="outline" size="sm" onClick={openRepeater}>
-                送入 Repeater
+                送入请求重发
               </Button>
             ) : null}
           </div>

@@ -21,6 +21,9 @@ const {
   truncateResponse,
 } = require("./repeater-state.ts");
 const {
+  joinRequestText,
+  splitRequestText,
+  requestFromTraffic,
   buildRawResponse,
   getHostHeader,
   headersFromReqHead,
@@ -392,4 +395,45 @@ test("secure origins retain native UUID generation", (t) => {
   const native = t.mock.method(globalThis.crypto, "randomUUID", () => "native-uuid");
   assert.equal(newId(), "native-uuid");
   assert.equal(native.mock.callCount(), 1);
+});
+
+test("combined request editing preserves body newlines and splits only the first HTTP separator", () => {
+  const body = '\n{\r\n  "a": 1\r\n}\n\n';
+  const text = joinRequestText("Host: example.test\nContent-Type: application/json", body);
+  assert.deepEqual(splitRequestText(text), { headersText: "Host: example.test\nContent-Type: application/json", body });
+  assert.deepEqual(splitRequestText("Host: example.test\n"), { headersText: "Host: example.test\n", body: "" });
+  assert.deepEqual(splitRequestText("Host: example.test\r\n\r\nhello\r\n\r\nworld"), {
+    headersText: "Host: example.test",
+    body: "hello\r\n\r\nworld",
+  });
+  assert.deepEqual(splitRequestText(joinRequestText("", "body only")), { headersText: "", body: "body only" });
+  assert.equal(joinRequestText("", ""), "");
+});
+
+test("traffic import uses captured metadata, preserves Host overrides and the full body", () => {
+  const flow = { method: "POST", url: "https://example.test:8443/upload?q=1", host: "example.test" };
+  const raw = "POST /upload?q=1 HTTP/1.1\r\nHost: override.test\r\nCookie: a=b\r\n\r\nfirst\r\n\r\nlast\n";
+  assert.deepEqual(requestFromTraffic(raw, flow), {
+    method: "POST",
+    url: flow.url,
+    headersText: "Host: override.test\r\nCookie: a=b",
+    body: "first\r\n\r\nlast\n",
+  });
+  assert.equal(
+    requestFromTraffic("POST /upload HTTP/1.1\nContent-Type: text/plain\n\nhello", flow).headersText,
+    "Host: example.test:8443\nContent-Type: text/plain",
+  );
+});
+
+test("traffic import rejects failed loads and blob preview markers rather than sending corrupted bodies", () => {
+  const flow = { method: "POST", url: "https://example.test/", host: "example.test" };
+  assert.throws(() => requestFromTraffic("（无法加载报文）", flow), /不完整/);
+  assert.throws(
+    () =>
+      requestFromTraffic(
+        `POST / HTTP/1.1\nHost: example.test\n\npreview\n…[truncated] @blob sha256:${"a".repeat(64)} (len=9999)`,
+        flow,
+      ),
+    /截断预览/,
+  );
 });

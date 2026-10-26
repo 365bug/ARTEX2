@@ -76,3 +76,41 @@ export function setHostHeader(headersText: string, host: string): string {
   if (first < 0 && value) result.unshift(`Host: ${value}`);
   return result.join("\n");
 }
+
+// Split only the HTTP separator; preserve all body bytes represented by the text.
+export function splitRequestText(text: string): { headersText: string; body: string } {
+  const separator = /\r?\n\r?\n/.exec(text);
+  if (!separator) return { headersText: text, body: "" };
+  return { headersText: text.slice(0, separator.index), body: text.slice(separator.index + separator[0].length) };
+}
+
+export function joinRequestText(headersText: string, body: string): string {
+  if (!headersText && !body) return "";
+  return `${headersText.replace(/(?:\r?\n)+$/, "")}\n\n${body}`;
+}
+
+export function requestFromTraffic(
+  raw: string,
+  exchange: { method: string; url: string; host: string },
+): RepeaterInitial {
+  const firstLine = /^[^\r\n]+(?:\r?\n|$)/.exec(raw);
+  if (!firstLine || !/^[A-Z]+\s+\S+\s+HTTP\/\d(?:\.\d)?\r?\n?$/i.test(firstLine[0])) {
+    throw new Error("请求报文不完整，无法送入请求重发");
+  }
+  const request = splitRequestText(raw.slice(firstLine[0].length));
+  if (/…\[truncated\] @blob sha256:[a-f0-9]{64}/.test(request.body)) {
+    throw new Error("请求正文为截断预览，请下载完整正文后再导入");
+  }
+  let host = exchange.host;
+  try {
+    host = new URL(exchange.url).host || host;
+  } catch {
+    /* Legacy URL uses the indexed host. */
+  }
+  return {
+    method: exchange.method,
+    url: exchange.url,
+    headersText: getHostHeader(request.headersText) ? request.headersText : setHostHeader(request.headersText, host),
+    body: request.body,
+  };
+}

@@ -138,7 +138,7 @@ export function FindingTrafficPanel({
                   router.push("/function/repeater");
                 }}
               >
-                打开 Repeater
+                打开请求重发
               </Button>
               {!readOnly ? (
                 <Button variant="outline" size="sm" disabled={!data || busy} onClick={() => setAdding(true)}>
@@ -201,7 +201,7 @@ export function FindingTrafficPanel({
                       查看报文
                     </Button>
                     <Button variant="outline" size="sm" disabled={repeaterBusy} onClick={() => void seedRepeater(b.id)}>
-                      送入 Repeater
+                      送入请求重发
                     </Button>
                     {!readOnly ? (
                       <>
