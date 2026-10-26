@@ -1,7 +1,5 @@
 "use client";
 
-import * as React from "react";
-
 import { SendIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,35 +22,23 @@ const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
   const { method, url, headersText, body, useProxy, insecure, response, history } = tab;
   const updateTab = useRepeaterStore((state) => state.updateTab);
-  const recordSend = useRepeaterStore((state) => state.recordSend);
+  const busy = useRepeaterStore((state) => state.inflight[tab.id] !== undefined);
   const setMethod = (method: string) => updateTab(tab.id, { method });
   const setURL = (url: string) => updateTab(tab.id, { url });
   const setHeadersText = (headersText: string) => updateTab(tab.id, { headersText });
   const setBody = (body: string) => updateTab(tab.id, { body });
   const setUseProxy = (useProxy: boolean) => updateTab(tab.id, { useProxy });
   const setInsecure = (insecure: boolean) => updateTab(tab.id, { insecure });
-  const [busy, setBusy] = React.useState(false);
-  const generation = React.useRef(0);
-  const sending = React.useRef(false);
-  React.useEffect(
-    () => () => {
-      generation.current += 1;
-      sending.current = false;
-    },
-    [],
-  );
-
   async function send() {
-    if (sending.current) return;
+    const store = useRepeaterStore.getState();
+    if (store.inflight[tab.id] !== undefined) return;
     const target = url.trim();
     if (!target) {
       toast.error("请填写 URL");
       return;
     }
-    const requestGeneration = ++generation.current;
-    sending.current = true;
-    setBusy(true);
-    updateTab(tab.id, { response: null });
+    const requestGeneration = store.beginSend(tab.id);
+    if (requestGeneration === undefined) return;
     try {
       const result = await api.repeaterSend({
         method,
@@ -62,8 +48,7 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
         use_recording_proxy: useProxy,
         insecure_skip_verify: insecure,
       });
-      if (requestGeneration !== generation.current) return;
-      recordSend(tab.id, {
+      store.completeSend(tab.id, requestGeneration, {
         id: newId(),
         method,
         url: target,
@@ -75,12 +60,9 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
         at: new Date().toISOString(),
       });
     } catch (error) {
-      if (requestGeneration === generation.current) toast.error((error as Error).message);
+      if (store.isCurrentSend(tab.id, requestGeneration)) toast.error((error as Error).message);
     } finally {
-      if (requestGeneration === generation.current) {
-        sending.current = false;
-        setBusy(false);
-      }
+      store.clearInflight(tab.id, requestGeneration);
     }
   }
 

@@ -5,7 +5,9 @@ import type { RepeaterInitial } from "./repeater-http";
 export const STORAGE_KEY = "artex_repeater_workspace_v1";
 export const MAX_HISTORY = 20;
 export const MAX_RESPONSE_CHARS = 256 * 1024;
-export const MAX_STORAGE_BYTES = 2.5 * 1024 * 1024;
+// Count UTF-16 storage bytes (two per code unit), reserving headroom below 5 MiB
+// for the storage key and other browser preferences.
+export const MAX_STORAGE_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_GROUP_ID = "default";
 
 export type RepeaterHistoryEntry = {
@@ -119,7 +121,7 @@ export function serializeWorkspace(workspace: RepeaterWorkspace, maxBytes = MAX_
     })),
   };
   let json = JSON.stringify(saved);
-  const size = () => new TextEncoder().encode(json).length;
+  const size = () => json.length * 2;
   // Remove the oldest send globally, including its request snapshot, first.
   const oldest = saved.tabs
     .flatMap((tab) => tab.history.map((entry) => ({ tab, entry })))

@@ -1,9 +1,9 @@
 "use client";
 
+import { toast } from "sonner";
 import { create } from "zustand";
 
-import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
-
+import { getLocalStorageValue } from "../../lib/local-storage.client";
 import type { RepeaterInitial } from "./repeater-http";
 import {
   addTab,
@@ -28,6 +28,11 @@ export type TabPatch = Partial<
 >;
 type Store = {
   workspace: RepeaterWorkspace | null;
+  inflight: Record<string, number>;
+  beginSend: (id: string) => number | undefined;
+  isCurrentSend: (id: string, generation: number) => boolean;
+  clearInflight: (id: string, generation: number) => void;
+  completeSend: (id: string, generation: number, entry: RepeaterHistoryEntry) => void;
   hydrate: () => void;
   createTab: (seed?: TabSeed, opts?: TabOptions) => string;
   closeTab: (id: string) => void;
@@ -44,11 +49,23 @@ type Store = {
 };
 
 let timer: ReturnType<typeof setTimeout> | undefined;
-function flush() {
+let nextGeneration = 0;
+export function flush() {
   if (timer) clearTimeout(timer);
   timer = undefined;
   const workspace = useRepeaterStore.getState().workspace;
-  if (workspace) setLocalStorageValue(STORAGE_KEY, serializeWorkspace(workspace));
+  if (!workspace) return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, serializeWorkspace(workspace));
+  } catch {
+    try {
+      // Retry with only drafts and response metadata: evict all history, then
+      // response bodies. Never shrink the request drafts, even if they exceed quota.
+      window.localStorage.setItem(STORAGE_KEY, serializeWorkspace(workspace, 0));
+    } catch {
+      toast.error("工作区保存失败，浏览器存储空间不足或不可用，请备份请求草稿");
+    }
+  }
 }
 
 export const useRepeaterStore = create<Store>((set, get) => {
@@ -73,6 +90,26 @@ export const useRepeaterStore = create<Store>((set, get) => {
   }
   return {
     workspace: null,
+    inflight: {},
+    beginSend: (id) => {
+      if (!current().tabs.some((tab) => tab.id === id)) return;
+      const generation = ++nextGeneration;
+      set({ inflight: { ...get().inflight, [id]: generation } });
+      return generation;
+    },
+    isCurrentSend: (id, generation) =>
+      get().inflight[id] === generation && !!get().workspace?.tabs.some((tab) => tab.id === id),
+    clearInflight: (id, generation) => {
+      if (get().inflight[id] !== generation) return;
+      const inflight = { ...get().inflight };
+      delete inflight[id];
+      set({ inflight });
+    },
+    completeSend: (id, generation, entry) => {
+      if (!get().isCurrentSend(id, generation)) return;
+      get().recordSend(id, entry);
+      get().clearInflight(id, generation);
+    },
     hydrate: () => {
       if (get().workspace || typeof window === "undefined") return;
       set({ workspace: deserializeWorkspace(getLocalStorageValue(STORAGE_KEY)) });
@@ -90,6 +127,8 @@ export const useRepeaterStore = create<Store>((set, get) => {
       const workspace = current();
       const index = workspace.tabs.findIndex((tab) => tab.id === id);
       if (index < 0) return;
+      const generation = get().inflight[id];
+      if (generation !== undefined) get().clearInflight(id, generation);
       const tabs = workspace.tabs.filter((tab) => tab.id !== id);
       if (!tabs.length) tabs.push(emptyTab());
       change({
@@ -120,7 +159,10 @@ export const useRepeaterStore = create<Store>((set, get) => {
     updateTab: editTab,
     recordSend: (id, entry) => {
       const tab = current().tabs.find((item) => item.id === id);
-      if (tab) editTab(id, { response: entry.response, history: [entry, ...tab.history].slice(0, MAX_HISTORY) });
+      if (tab) {
+        editTab(id, { response: entry.response, history: [entry, ...tab.history].slice(0, MAX_HISTORY) });
+        flush();
+      }
     },
     createGroup: (name) => {
       const workspace = current();
@@ -151,6 +193,7 @@ export const useRepeaterStore = create<Store>((set, get) => {
       });
     },
     clearWorkspace: () => {
+      set({ inflight: {} });
       change(defaultWorkspace());
       flush();
     },
