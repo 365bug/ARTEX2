@@ -51,6 +51,8 @@ import type {
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
+  RepeaterSendRequest,
+  RepeaterSendResponse,
   IntelligencePage,
   IntentAsset,
   InterceptApprovalFilter,
@@ -733,6 +735,7 @@ export const api = {
     get<FindingTrafficDetail>(
       `/exploration/findings/${id}/traffic/${bindingId}${contextTask ? `?context_task=${encodeURIComponent(contextTask)}` : ""}`,
     ),
+  repeaterSend: (req: RepeaterSendRequest) => post<RepeaterSendResponse>("/repeater/send", req),
   findingTrafficBody: (
     id: string,
     bindingId: string,

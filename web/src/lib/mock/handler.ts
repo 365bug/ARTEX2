@@ -1012,6 +1012,24 @@ export async function mockHandle<T>(method: string, rawPath: string, body?: Body
 function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Record<string, unknown>): unknown {
   const task = q.get("task") ?? undefined;
 
+  // The demo client still expects the complete repeater response shape. No
+  // network request is made in mock mode, but returning the shape keeps the
+  // dialog's status/body counters safe for every method.
+  if (path === "/repeater/send" && m === "POST") {
+    const responseBody = "（演示模式）未发送真实请求。";
+    return {
+      status: 200,
+      status_text: "200 OK",
+      proto: "HTTP/1.1",
+      headers: { "Content-Type": ["text/plain; charset=utf-8"] },
+      body: responseBody,
+      body_truncated: false,
+      body_bytes: new TextEncoder().encode(responseBody).length,
+      elapsed_ms: 0,
+      url: String(b.url ?? ""),
+    };
+  }
+
   if (path === "/chat/mentions" && m === "GET") {
     const kind = q.get("kind") ?? "";
     const query = (q.get("q") ?? "").trim().toLowerCase();
