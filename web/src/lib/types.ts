@@ -1645,6 +1645,7 @@ export interface FindingTrafficDetail {
 
 export interface RepeaterSendRequest {
   method: string;
+  http_version?: string;
   url: string;
   headers?: Record<string, string>;
   body?: string;

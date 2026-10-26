@@ -32,6 +32,7 @@ var repeaterHopByHop = map[string]struct{}{
 }
 
 type repeaterSendRequest struct {
+	HTTPVersion        string            `json:"http_version"`
 	Method             *string           `json:"method"`
 	URL                string            `json:"url"`
 	Headers            map[string]string `json:"headers"`
@@ -86,6 +87,13 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 		http.MethodDelete, http.MethodHead, http.MethodOptions:
 	default:
 		writeErr(w, http.StatusBadRequest, "不支持的 HTTP 方法")
+		return
+	}
+
+	switch in.HTTPVersion {
+	case "", "HTTP/1.1", "HTTP/2.0":
+	default:
+		writeErr(w, http.StatusBadRequest, "当前支持 HTTP/1.1 和 HTTP/2.0")
 		return
 	}
 
@@ -151,9 +159,30 @@ func (s *Server) sendRepeater(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set(name, value)
 	}
 
+	transport := s.repeaterTransport(useRecordingProxy, in.InsecureSkipVerify)
+	if in.HTTPVersion != "" {
+		tr := transport.(*http.Transport)
+		// Keep TLS ALPN consistent with the explicit protocol, even when an
+		// inherited transport previously advertised h2.
+		if tr.TLSClientConfig == nil {
+			tr.TLSClientConfig = &tls.Config{}
+		} else {
+			tr.TLSClientConfig = tr.TLSClientConfig.Clone()
+		}
+		tr.TLSClientConfig.NextProtos = []string{"http/1.1"}
+		if in.HTTPVersion == "HTTP/2.0" {
+			tr.TLSClientConfig.NextProtos = []string{"h2"}
+		}
+		tr.ForceAttemptHTTP2 = in.HTTPVersion == "HTTP/2.0"
+		tr.Protocols = new(http.Protocols)
+		tr.Protocols.SetHTTP1(in.HTTPVersion == "HTTP/1.1")
+		tr.Protocols.SetHTTP2(in.HTTPVersion == "HTTP/2.0")
+		tr.Protocols.SetUnencryptedHTTP2(in.HTTPVersion == "HTTP/2.0" && strings.EqualFold(u.Scheme, "http"))
+	}
+
 	client := &http.Client{
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
-		Transport: s.repeaterTransport(useRecordingProxy, in.InsecureSkipVerify),
+		Transport: transport,
 		CheckRedirect: func(next *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("重定向次数过多")
