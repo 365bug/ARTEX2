@@ -4,13 +4,15 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import { ArrowDownIcon, ArrowUpIcon, ArrowUpRightIcon, ChevronRightIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ArrowUpRightIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { FindingCaseList } from "@/components/finding-case-list";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api } from "@/lib/api";
@@ -139,6 +141,8 @@ function Row({
 export function FindingsTab({ taskId }: { taskId: string }) {
   const [findings, setFindings] = React.useState<Finding[]>([]);
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
+  const [search, setSearch] = React.useState("");
+  const [query, setQuery] = React.useState("");
   const [sortPreference, setSortPreference] = useStoredSortPreference(
     FINDING_SORT_PREFERENCE_KEY,
     FINDING_SORT_FIELDS,
@@ -179,28 +183,58 @@ export function FindingsTab({ taskId }: { taskId: string }) {
     }
   }, []);
 
-  // Discover inherited sources before severity filtering; finding-cases owns folder matching.
+  // Discover inherited sources before filtering; finding-cases owns folder matching.
   const taskFindings = findings.filter((f) => f.task_id === taskId || f.inherited);
-  const items = filterAndSortFindings(taskFindings, severity, sortPreference.direction);
+  const items = filterAndSortFindings(taskFindings, severity, sortPreference.direction, query);
 
   return (
     <div className="flex flex-col gap-4">
-      <ToggleGroup
-        type="single"
-        value={severity}
-        onValueChange={(value) => value && setSeverity(value as "all" | Severity)}
-        variant="outline"
-        size="sm"
-        spacing={0}
-      >
-        {SEVERITY_FILTER_OPTIONS.map(([val, label]) => (
-          <ToggleGroupItem key={val} value={val} aria-label={`按${label}等级筛选`}>
-            {label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      <div className="flex flex-wrap items-center gap-3">
+        <ToggleGroup
+          type="single"
+          value={severity}
+          onValueChange={(value) => value && setSeverity(value as "all" | Severity)}
+          variant="outline"
+          size="sm"
+          spacing={0}
+        >
+          {SEVERITY_FILTER_OPTIONS.map(([val, label]) => (
+            <ToggleGroupItem key={val} value={val} aria-label={`按${label}等级筛选`}>
+              {label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <form
+          className="flex w-full items-center gap-2 sm:w-auto"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setQuery(search.trim());
+          }}
+        >
+          <InputGroup className="flex-1 sm:w-72">
+            <InputGroupInput
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="检索漏洞内容"
+              aria-label="检索漏洞内容"
+            />
+            <InputGroupAddon>
+              <SearchIcon aria-hidden="true" />
+            </InputGroupAddon>
+          </InputGroup>
+          <Button type="submit" size="sm" aria-label="搜索">
+            搜索
+          </Button>
+        </form>
+      </div>
       <FindingCaseList
-        query={{ task: taskId, severity: severity === "all" ? undefined : severity, sort: "severity" }}
+        query={{
+          task: taskId,
+          severity: severity === "all" ? undefined : severity,
+          query: query || undefined,
+          sort: "severity",
+        }}
         contextTask={taskId}
       />
       {[
@@ -214,7 +248,12 @@ export function FindingsTab({ taskId }: { taskId: string }) {
         <div key={source}>
           <p className="mb-2 text-sm text-muted-foreground">继承任务 #{source} · 只读</p>
           <FindingCaseList
-            query={{ task: source, severity: severity === "all" ? undefined : severity, sort: "severity" }}
+            query={{
+              task: source,
+              severity: severity === "all" ? undefined : severity,
+              query: query || undefined,
+              sort: "severity",
+            }}
             contextTask={taskId}
             readOnly
           />
@@ -250,7 +289,9 @@ export function FindingsTab({ taskId }: { taskId: string }) {
             ))}
             {items.length === 0 && (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                {severity === "all" ? "本任务及直接关联任务暂无确认发现。" : "当前风险等级暂无原始上报。"}
+                {severity !== "all" || query
+                  ? "当前筛选与搜索条件下暂无原始上报。"
+                  : "本任务及直接关联任务暂无确认发现。"}
               </p>
             )}
           </CardContent>

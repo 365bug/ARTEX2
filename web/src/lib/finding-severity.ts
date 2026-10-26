@@ -6,9 +6,18 @@ export function filterAndSortFindings(
   findings: readonly Finding[],
   severity: "all" | Severity,
   timeDirection: "asc" | "desc",
+  query?: string,
 ): Finding[] {
+  const keyword = query?.trim().toLowerCase() ?? "";
   return findings
-    .filter((finding) => severity === "all" || finding.severity === severity)
+    .filter(
+      (finding) =>
+        (severity === "all" || finding.severity === severity) &&
+        (!keyword ||
+          [finding.name, finding.vulnclass, finding.summary, finding.evidence].some((value) =>
+            (value ?? "").toLowerCase().includes(keyword),
+          )),
+    )
     .sort((a, b) => {
       const severityCompared = (SEVERITY_RANK[b.severity] ?? 0) - (SEVERITY_RANK[a.severity] ?? 0);
       if (severityCompared !== 0) return severityCompared;
