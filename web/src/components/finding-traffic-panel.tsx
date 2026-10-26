@@ -2,10 +2,13 @@
 
 import * as React from "react";
 
+import { useRouter } from "next/navigation";
+
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { FindingRepeaterDialog, headersFromReqHead, type RepeaterInitial } from "@/components/finding-repeater-dialog";
+import { headersFromReqHead } from "@/components/repeater/repeater-http";
+import { seedFromEvidence } from "@/components/repeater/repeater-store";
 import { TrafficEvidenceViewer } from "@/components/traffic-evidence-viewer";
 import { TrafficPickerDialog } from "@/components/traffic-picker-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -50,8 +53,7 @@ export function FindingTrafficPanel({
   const [error, setError] = React.useState("");
   const [adding, setAdding] = React.useState(false);
   const [preview, setPreview] = React.useState<string | null>(null);
-  const [repeaterOpen, setRepeaterOpen] = React.useState(false);
-  const [repeaterInitial, setRepeaterInitial] = React.useState<RepeaterInitial>();
+  const router = useRouter();
   const [repeaterBusy, setRepeaterBusy] = React.useState(false);
   const [editing, setEditing] = React.useState<FindingTrafficBinding | null>(null);
   const [role, setRole] = React.useState<TrafficEvidenceRole>("supporting");
@@ -104,13 +106,16 @@ export function FindingTrafficPanel({
       const detail = await api.findingTrafficDetail(findingId, bindingId, contextTask);
       if (detail.request.binary) toast.info("请求体为二进制，已留空；完整正文请先下载");
       else if (detail.request.truncated) toast.info("请求体为预览片段，完整正文请先下载");
-      setRepeaterInitial({
-        method: detail.binding.snapshot.method || "GET",
-        url: detail.binding.snapshot.url || "",
-        headersText: headersFromReqHead(detail.binding.snapshot.req_head),
-        body: detail.request.binary ? "" : detail.request.content || "",
-      });
-      setRepeaterOpen(true);
+      seedFromEvidence(
+        {
+          method: detail.binding.snapshot.method || "GET",
+          url: detail.binding.snapshot.url || "",
+          headersText: headersFromReqHead(detail.binding.snapshot.req_head),
+          body: detail.request.binary ? "" : detail.request.content || "",
+        },
+        { findingId, bindingId },
+      );
+      router.push("/function/repeater");
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -129,8 +134,8 @@ export function FindingTrafficPanel({
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setRepeaterInitial({ method: "GET", url: "", headersText: "", body: "" });
-                  setRepeaterOpen(true);
+                  seedFromEvidence({ method: "GET", url: "", headersText: "", body: "" });
+                  router.push("/function/repeater");
                 }}
               >
                 打开 Repeater
@@ -177,18 +182,18 @@ export function FindingTrafficPanel({
                   <Badge variant="secondary">
                     {b.snapshot.method} · {b.snapshot.status}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">证据 #{b.id}</span>
+                  <span className="text-muted-foreground text-xs">证据 #{b.id}</span>
                 </div>
                 <Button
                   variant="link"
-                  className="h-auto justify-start p-0 text-left whitespace-normal"
+                  className="h-auto justify-start whitespace-normal p-0 text-left"
                   onClick={() => setPreview(b.id)}
                 >
                   <span className="break-all font-mono text-xs">{b.snapshot.url}</span>
                 </Button>
-                {b.note ? <p className="text-sm whitespace-pre-wrap">{b.note}</p> : null}
+                {b.note ? <p className="whitespace-pre-wrap text-sm">{b.note}</p> : null}
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-muted-foreground text-xs">
                     {new Date(b.snapshot.captured_at * 1000).toLocaleString("zh-CN")}
                   </span>
                   <div className="flex flex-wrap gap-1">
@@ -266,12 +271,6 @@ export function FindingTrafficPanel({
         bindingId={preview}
         contextTask={contextTask}
         onClose={() => setPreview(null)}
-      />
-      <FindingRepeaterDialog
-        open={repeaterOpen}
-        onOpenChange={setRepeaterOpen}
-        initial={repeaterInitial}
-        findingLabel={`发现 #${findingId}`}
       />
       <Dialog
         open={editing !== null}
