@@ -9,58 +9,66 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 
 import {
+  buildRawRequest,
   buildRawResponse,
-  getHostHeader,
-  joinRequestText,
+  connectionOrigin,
   parseHeadersText,
-  setHostHeader,
-  splitRequestText,
+  parseRawRequest,
 } from "./repeater-http";
 import { newId, type RepeaterTab } from "./repeater-state";
 import { useRepeaterStore } from "./repeater-store";
 import { RepeaterTextPane } from "./repeater-text-pane";
 
-const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-
 export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
-  const { method, url, headersText, body, useProxy, insecure, response } = tab;
+  const { useProxy, insecure, response } = tab;
   const updateTab = useRepeaterStore((state) => state.updateTab);
   const busy = useRepeaterStore((state) => state.inflight[tab.id] !== undefined);
-  const setMethod = (method: string) => updateTab(tab.id, { method });
-  const setURL = (url: string) => updateTab(tab.id, { url });
-  const setHeadersText = (headersText: string) => updateTab(tab.id, { headersText });
-  const [request, setRequest] = React.useState(() => ({ headersText, body, text: joinRequestText(headersText, body) }));
-  // Keep partial edits (including a single trailing newline) intact while syncing
-  // changes made by the Host control or by restoring a history entry.
-  if (request.headersText !== headersText || request.body !== body) {
-    setRequest({ headersText, body, text: joinRequestText(headersText, body) });
-  }
-  function changeRequest(text: string) {
-    const parts = splitRequestText(text);
-    setRequest({ ...parts, text });
-    updateTab(tab.id, parts);
+  const [targetOpen, setTargetOpen] = React.useState(false);
+  const [targetDraft, setTargetDraft] = React.useState("");
+  const targetOrigin = tab.targetOrigin ?? (tab.rawRequest === undefined ? connectionOrigin(tab.url) : "");
+  const requestText = buildRawRequest(tab);
+  function changeRequest(rawRequest: string) {
+    try {
+      const { httpVersion: _version, ...parts } = parseRawRequest(rawRequest, targetOrigin);
+      updateTab(tab.id, { ...parts, rawRequest, targetOrigin });
+    } catch {
+      // Preserve incomplete first lines and headers as drafts without rewriting
+      // the text or moving the caret. Validate only when the user sends.
+      updateTab(tab.id, { rawRequest, targetOrigin });
+    }
   }
   const setUseProxy = (useProxy: boolean) => updateTab(tab.id, { useProxy });
   const setInsecure = (insecure: boolean) => updateTab(tab.id, { insecure });
   async function send() {
     const store = useRepeaterStore.getState();
     if (store.inflight[tab.id] !== undefined) return;
-    const target = url.trim();
-    if (!target) {
-      toast.error("请填写 URL");
+    let parsed: ReturnType<typeof parseRawRequest>;
+    try {
+      parsed = parseRawRequest(requestText, targetOrigin);
+    } catch (error) {
+      toast.error((error as Error).message);
       return;
     }
+    const { method, url: target, headersText, body, httpVersion } = parsed;
     const requestGeneration = store.beginSend(tab.id);
     if (requestGeneration === undefined) return;
     try {
       const result = await api.repeaterSend({
         method,
+        http_version: httpVersion,
         url: target,
         headers: parseHeadersText(headersText),
         body,
@@ -73,6 +81,8 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
         url: target,
         headersText,
         body,
+        rawRequest: requestText,
+        targetOrigin,
         useProxy,
         insecure,
         response: result,
@@ -87,57 +97,26 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
 
   return (
     <section aria-label="请求编辑器" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-      <FieldGroup className="flex-row flex-wrap items-end gap-2">
-        <Field className="w-28">
-          <FieldLabel htmlFor="repeater-method" className="mb-1 block text-muted-foreground text-xs">
-            方法
-          </FieldLabel>
-          <Select value={method} onValueChange={setMethod} disabled={busy}>
-            <SelectTrigger id="repeater-method">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {[...new Set([...METHODS, method])].map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {item}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field className="min-w-[240px] flex-1">
-          <FieldLabel htmlFor="repeater-url" className="mb-1 block text-muted-foreground text-xs">
-            URL
-          </FieldLabel>
-          <Input
-            disabled={busy}
-            id="repeater-url"
-            value={url}
-            onChange={(event) => setURL(event.target.value)}
-            placeholder="https://target.example/path"
-            spellCheck={false}
-          />
-        </Field>
-        <Field className="min-w-[180px] flex-1">
-          <FieldLabel htmlFor="repeater-host" className="mb-1 block text-muted-foreground text-xs">
-            Host 请求头
-          </FieldLabel>
-          <Input
-            id="repeater-host"
-            disabled={busy}
-            value={getHostHeader(headersText)}
-            onChange={(event) => setHeadersText(setHostHeader(headersText, event.target.value))}
-            placeholder="可选，留空使用 URL 主机"
-            spellCheck={false}
-          />
-        </Field>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs" title={targetOrigin || tab.url}>
+          发送目标：{targetOrigin || connectionOrigin(tab.url) || "按 Host 请求头（默认 HTTPS）"}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setTargetDraft(targetOrigin || connectionOrigin(tab.url));
+            setTargetOpen(true);
+          }}
+        >
+          修改目标
+        </Button>
         <Button disabled={busy} onClick={() => void send()}>
           <SendIcon data-icon="inline-start" />
           {busy ? "发送中…" : "发送"}
         </Button>
-      </FieldGroup>
+      </div>
       <FieldSet className="flex-row flex-wrap items-center gap-4 text-sm">
         <FieldLegend className="sr-only">发送选项</FieldLegend>
         <FieldLabel className="flex items-center gap-2" htmlFor="repeater-use-proxy">
@@ -171,10 +150,10 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
         <RepeaterTextPane
           id="repeater-request"
           label="请求"
-          value={request.text}
+          value={requestText}
           onChange={changeRequest}
           disabled={busy}
-          placeholder="Header: value（请求头与正文用空行分隔）"
+          placeholder="POST /path HTTP/1.1"
         />
         <div className="flex min-h-[300px] min-w-0 flex-col gap-2 xl:min-h-0">
           {response?.error ? (
@@ -190,6 +169,50 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
           />
         </div>
       </div>
+      <Dialog open={targetOpen} onOpenChange={setTargetOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改发送目标</DialogTitle>
+            <DialogDescription>
+              设置连接地址和 HTTP/HTTPS。方法、路径和 Host 均在左侧报文中编辑；Host 可以与连接目标不同。
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const origin = targetDraft.trim() ? connectionOrigin(targetDraft.trim()) : "";
+              if (targetDraft.trim() && !origin) {
+                toast.error("请填写 http:// 或 https:// 开头的地址");
+                return;
+              }
+              try {
+                const { httpVersion: _version, ...parts } = parseRawRequest(requestText, origin);
+                updateTab(tab.id, { ...parts, rawRequest: requestText, targetOrigin: origin });
+              } catch {
+                updateTab(tab.id, { rawRequest: requestText, targetOrigin: origin });
+              }
+              setTargetOpen(false);
+            }}
+          >
+            <Field>
+              <FieldLabel htmlFor="repeater-target">发送目标</FieldLabel>
+              <Input
+                id="repeater-target"
+                placeholder="https://example.com:443，留空按 Host 连接"
+                value={targetDraft}
+                onChange={(event) => setTargetDraft(event.target.value)}
+              />
+            </Field>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setTargetOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit">保存目标</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

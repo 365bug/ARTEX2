@@ -24,7 +24,10 @@ import {
 } from "./repeater-state";
 
 export type TabPatch = Partial<
-  Pick<RepeaterTab, "method" | "url" | "headersText" | "body" | "useProxy" | "insecure" | "response">
+  Pick<
+    RepeaterTab,
+    "method" | "url" | "headersText" | "body" | "rawRequest" | "targetOrigin" | "useProxy" | "insecure" | "response"
+  >
 >;
 type Store = {
   workspace: RepeaterWorkspace | null;
@@ -36,6 +39,8 @@ type Store = {
   hydrate: () => void;
   createTab: (seed?: TabSeed, opts?: TabOptions) => string;
   closeTab: (id: string) => void;
+  closeTabs: (ids: string[]) => void;
+  setTabsGroup: (ids: string[], groupId: string) => void;
   renameTab: (id: string, title: string) => void;
   setActiveTab: (id: string) => void;
   updateTab: (id: string, patch: TabPatch) => void;
@@ -123,23 +128,26 @@ export const useRepeaterStore = create<Store>((set, get) => {
       change(workspace);
       return workspace.tabs[workspace.tabs.length - 1].id;
     },
-    closeTab: (id) => {
+    closeTab: (id) => get().closeTabs([id]),
+    closeTabs: (ids) => {
       const workspace = current();
-      const index = workspace.tabs.findIndex((tab) => tab.id === id);
-      if (index < 0) return;
-      const generation = get().inflight[id];
-      if (generation !== undefined) get().clearInflight(id, generation);
-      const tabs = workspace.tabs.filter((tab) => tab.id !== id);
+      const removed = new Set(ids);
+      if (!workspace.tabs.some((tab) => removed.has(tab.id))) return;
+      const inflight = { ...get().inflight };
+      for (const id of removed) delete inflight[id];
+      set({ inflight });
+      const tabs = workspace.tabs.filter((tab) => !removed.has(tab.id));
       if (!tabs.length) tabs.push(emptyTab());
+      const activeIndex = workspace.tabs.findIndex((tab) => tab.id === workspace.activeTabId);
+      const active =
+        tabs.find((tab) => tab.id === workspace.activeTabId) ??
+        workspace.tabs.slice(activeIndex + 1).find((tab) => !removed.has(tab.id)) ??
+        tabs[tabs.length - 1];
       change({
         ...workspace,
         tabs,
-        groups: workspace.groups.map((group) =>
-          group.id === tabs[Math.min(index, tabs.length - 1)].groupId && workspace.activeTabId === id
-            ? { ...group, collapsed: false }
-            : group,
-        ),
-        activeTabId: workspace.activeTabId === id ? tabs[Math.min(index, tabs.length - 1)].id : workspace.activeTabId,
+        activeTabId: active.id,
+        groups: workspace.groups.map((group) => (group.id === active.groupId ? { ...group, collapsed: false } : group)),
       });
       flush();
     },
@@ -179,11 +187,20 @@ export const useRepeaterStore = create<Store>((set, get) => {
         groups: workspace.groups.map((group) => (group.id === id ? { ...group, name: name.trim() } : group)),
       });
     },
-    setTabGroup: (tabId, groupId) => {
+    setTabGroup: (tabId, groupId) => get().setTabsGroup([tabId], groupId),
+    setTabsGroup: (ids, groupId) => {
       const workspace = current();
       if (!workspace.groups.some((group) => group.id === groupId)) return;
-      editTab(tabId, { groupId });
-      if (workspace.activeTabId === tabId) get().setActiveTab(tabId);
+      const selected = new Set(ids);
+      if (!workspace.tabs.some((tab) => selected.has(tab.id))) return;
+      change({
+        ...workspace,
+        tabs: workspace.tabs.map((tab) =>
+          selected.has(tab.id) ? { ...tab, groupId, updatedAt: new Date().toISOString() } : tab,
+        ),
+        groups: workspace.groups.map((group) => (group.id === groupId ? { ...group, collapsed: false } : group)),
+      });
+      flush();
     },
     toggleGroupCollapsed: (id) => {
       const workspace = current();

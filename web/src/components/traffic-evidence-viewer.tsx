@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { HttpCodeBlock } from "@/components/http-code-block";
-import { headersFromReqHead } from "@/components/repeater/repeater-http";
+import { headersFromReqHead, requestFromEvidence } from "@/components/repeater/repeater-http";
 import { seedFromEvidence } from "@/components/repeater/repeater-store";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -72,12 +72,15 @@ export function TrafficEvidenceViewer({
     if (detail.request.binary) toast.info("请求体为二进制，已留空；完整正文请先下载");
     else if (detail.request.truncated) toast.info("请求体为预览片段，完整正文请先下载");
     seedFromEvidence(
-      {
-        method: detail.binding.snapshot.method || "GET",
-        url: detail.binding.snapshot.url || "",
-        headersText: headersFromReqHead(detail.binding.snapshot.req_head),
-        body: detail.request.binary ? "" : detail.request.content || "",
-      },
+      requestFromEvidence(
+        {
+          method: detail.binding.snapshot.method || "GET",
+          url: detail.binding.snapshot.url || "",
+          headersText: headersFromReqHead(detail.binding.snapshot.req_head),
+          body: detail.request.binary ? "" : detail.request.content || "",
+        },
+        detail.binding.snapshot.req_head,
+      ),
       { findingId, bindingId: detail.binding.id },
     );
     router.push("/function/repeater");

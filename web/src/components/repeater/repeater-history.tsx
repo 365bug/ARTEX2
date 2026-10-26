@@ -30,6 +30,8 @@ export function RepeaterHistory({ tab }: { tab?: RepeaterTab }) {
                   url: entry.url,
                   headersText: entry.headersText,
                   body: entry.body,
+                  rawRequest: entry.rawRequest,
+                  targetOrigin: entry.targetOrigin,
                   useProxy: entry.useProxy,
                   insecure: entry.insecure,
                   response: entry.response,

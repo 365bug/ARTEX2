@@ -5,6 +5,8 @@ export type RepeaterInitial = {
   url?: string;
   headersText?: string;
   body?: string;
+  rawRequest?: string;
+  targetOrigin?: string;
 };
 
 export function parseHeadersText(text: string): Record<string, string> {
@@ -107,10 +109,74 @@ export function requestFromTraffic(
   } catch {
     /* Legacy URL uses the indexed host. */
   }
+  const headersText = getHostHeader(request.headersText)
+    ? request.headersText
+    : setHostHeader(request.headersText, host);
+  const rawRequest = `${firstLine[0].trimEnd()}\n${joinRequestText(headersText, request.body)}`;
+  const parsed = parseRawRequest(rawRequest, connectionOrigin(exchange.url));
   return {
-    method: exchange.method,
-    url: exchange.url,
-    headersText: getHostHeader(request.headersText) ? request.headersText : setHostHeader(request.headersText, host),
-    body: request.body,
+    method: parsed.method,
+    url: parsed.url,
+    headersText: parsed.headersText,
+    body: parsed.body,
+    rawRequest,
+    targetOrigin: connectionOrigin(exchange.url),
   };
+}
+
+export function connectionOrigin(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return /^https?:$/.test(parsed.protocol) ? parsed.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+export function buildRawRequest(request: RepeaterInitial): string {
+  if (request.rawRequest !== undefined) return request.rawRequest;
+  let target = "/";
+  let host = "";
+  try {
+    const url = new URL(request.url ?? "");
+    target = url.pathname + url.search;
+    host = url.host;
+  } catch {
+    /* New empty draft. */
+  }
+  const headersText = request.headersText?.trim() ? request.headersText : `Host: ${host}`;
+  return `${request.method ?? "GET"} ${target} HTTP/1.1\n${joinRequestText(headersText, request.body ?? "")}`;
+}
+
+export function parseRawRequest(
+  text: string,
+  targetOrigin = "",
+): { method: string; url: string; headersText: string; body: string; httpVersion: string } {
+  const newline = text.indexOf("\n");
+  const line = (newline < 0 ? text : text.slice(0, newline)).trim();
+  const match = /^([A-Za-z]+)\s+(\S+)\s+(HTTP\/(?:1\.[01]|2(?:\.0)?))$/.exec(line);
+  if (!match) throw new Error("请求首行应为：POST /path HTTP/1.1");
+  const parts = splitRequestText(newline < 0 ? "" : text.slice(newline + 1));
+  let url: URL;
+  if (/^https?:\/\//i.test(match[2])) url = new URL(match[2]);
+  else {
+    if (!match[2].startsWith("/")) throw new Error("请求路径必须以 / 开头，或填写完整 http/https URL");
+    const origin = connectionOrigin(targetOrigin) || connectionOrigin(`https://${getHostHeader(parts.headersText)}`);
+    if (!origin) throw new Error("请填写 Host 请求头或设置发送目标");
+    url = new URL(origin + match[2]);
+  }
+  if (url.hash) throw new Error("请求路径不能包含 URL 片段，请使用 %23 表示 #");
+  return {
+    ...parts,
+    method: match[1].toUpperCase(),
+    url: url.href,
+    httpVersion: match[3] === "HTTP/2" ? "HTTP/2.0" : match[3],
+  };
+}
+
+export function requestFromEvidence(initial: RepeaterInitial, requestHead?: string): RepeaterInitial {
+  const firstLine = requestHead?.trimStart().split(/\r?\n/, 1)[0] || "";
+  if (!/^[A-Za-z]+\s+\S+\s+HTTP\/\d(?:\.\d)?$/.test(firstLine)) return initial;
+  const rawRequest = `${firstLine}\n${joinRequestText(initial.headersText ?? "", initial.body ?? "")}`;
+  return { ...initial, rawRequest, targetOrigin: connectionOrigin(initial.url ?? "") };
 }

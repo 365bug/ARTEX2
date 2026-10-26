@@ -402,3 +402,41 @@ func TestRepeaterRedactProxyCredentials(t *testing.T) {
 		})
 	}
 }
+
+func TestRepeaterHonorsExplicitHTTPVersion(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "1")
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Proto)
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	for _, version := range []string{"HTTP/1.1", "HTTP/2.0"} {
+		t.Run(version, func(t *testing.T) {
+			code, out, raw := repeaterTestSend(t, &Server{}, map[string]any{
+				"method": "GET", "url": srv.URL, "http_version": version,
+				"insecure_skip_verify": true, "use_recording_proxy": false,
+			})
+			if code != http.StatusOK || out.Error != "" || out.Body != version {
+				t.Fatalf("version %s: status=%d response=%s", version, code, raw)
+			}
+		})
+	}
+	code, _, _ := repeaterTestSend(t, &Server{}, map[string]any{"method": "GET", "url": srv.URL, "http_version": "HTTP/1.0"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("unsupported version status=%d", code)
+	}
+}
+
+func TestRepeaterExplicitHTTP2Cleartext(t *testing.T) {
+	t.Setenv(repeaterAllowLocalEnv, "1")
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, r.Proto) }))
+	srv.Config.Protocols = new(http.Protocols)
+	srv.Config.Protocols.SetUnencryptedHTTP2(true)
+	srv.Start()
+	defer srv.Close()
+	code, out, raw := repeaterTestSend(t, &Server{}, map[string]any{"method": "GET", "url": srv.URL, "http_version": "HTTP/2.0", "use_recording_proxy": false})
+	if code != http.StatusOK || out.Error != "" || out.Body != "HTTP/2.0" {
+		t.Fatalf("status=%d response=%s", code, raw)
+	}
+}

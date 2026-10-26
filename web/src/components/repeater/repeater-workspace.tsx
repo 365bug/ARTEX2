@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { ChevronDown, ChevronRight, FolderPlus, Pencil, Plus, X } from "lucide-react";
+import { FolderPlus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -28,10 +28,9 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
 
 import { RepeaterEditor } from "./repeater-editor";
-import { RepeaterHistory } from "./repeater-history";
+import { RepeaterNavigator } from "./repeater-navigator";
 import { useRepeaterStore } from "./repeater-store";
 
 export function RepeaterWorkspace() {
@@ -86,89 +85,7 @@ export function RepeaterWorkspace() {
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <nav
-          aria-label="请求重发分组和标签"
-          className="flex max-h-64 min-h-0 shrink-0 flex-col gap-3 overflow-hidden rounded-md border p-2 lg:max-h-none lg:w-56"
-        >
-          <div className="max-h-32 shrink-0 overflow-y-auto lg:max-h-[45%]">
-            {workspace.groups.map((group) => (
-              <div key={group.id} className="flex flex-col gap-1">
-                <div className="flex min-w-0 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`${group.collapsed ? "展开" : "折叠"}分组 ${group.name}`}
-                    onClick={() => store.toggleGroupCollapsed(group.id)}
-                  >
-                    {group.collapsed ? <ChevronRight /> : <ChevronDown />}
-                  </Button>
-                  <span className="min-w-0 flex-1 truncate font-medium text-sm" title={group.name}>
-                    {group.name}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`重命名分组 ${group.name}`}
-                    onClick={() => setRename({ kind: "group", id: group.id, name: group.name })}
-                  >
-                    <Pencil />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`新建标签 · ${group.name}`}
-                    title="新建标签"
-                    onClick={() => store.createTab({}, { groupId: group.id })}
-                  >
-                    <Plus />
-                  </Button>
-                </div>
-                {!group.collapsed
-                  ? workspace.tabs
-                      .filter((tab) => tab.groupId === group.id)
-                      .map((tab) => (
-                        <div
-                          key={tab.id}
-                          className={cn(
-                            "flex min-w-0 items-center gap-1 rounded-md",
-                            active?.id === tab.id && "bg-accent",
-                          )}
-                        >
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-current={active?.id === tab.id ? "page" : undefined}
-                            className="min-w-0 flex-1 justify-start"
-                            onClick={() => store.setActiveTab(tab.id)}
-                            onDoubleClick={() => setRename({ kind: "tab", id: tab.id, name: tab.title })}
-                            title={`${tab.title}\n${tab.url}`}
-                          >
-                            <span className="truncate">{tab.title}</span>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`重命名标签 ${tab.title}`}
-                            onClick={() => setRename({ kind: "tab", id: tab.id, name: tab.title })}
-                          >
-                            <Pencil />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`关闭标签 ${tab.title}`}
-                            onClick={() => store.closeTab(tab.id)}
-                          >
-                            <X />
-                          </Button>
-                        </div>
-                      ))
-                  : null}
-              </div>
-            ))}
-          </div>
-          <RepeaterHistory tab={active} />
-        </nav>
+        <RepeaterNavigator workspace={workspace} onRename={setRename} />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
           {active ? (
             <>

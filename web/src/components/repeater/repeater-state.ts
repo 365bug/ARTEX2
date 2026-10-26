@@ -16,6 +16,8 @@ export type RepeaterHistoryEntry = {
   url: string;
   headersText: string;
   body: string;
+  rawRequest?: string;
+  targetOrigin?: string;
   useProxy: boolean;
   insecure: boolean;
   response: RepeaterSendResponse;
@@ -37,7 +39,10 @@ export type RepeaterWorkspace = {
   activeTabId: string | null;
 };
 export type TabSeed = Partial<
-  Pick<RepeaterTab, "method" | "url" | "headersText" | "body" | "useProxy" | "insecure" | "source">
+  Pick<
+    RepeaterTab,
+    "method" | "url" | "headersText" | "body" | "rawRequest" | "targetOrigin" | "useProxy" | "insecure" | "source"
+  >
 >;
 export type TabOptions = { groupId?: string; title?: string; activate?: boolean };
 
@@ -169,6 +174,8 @@ function isRequest(
   return (
     isRecord(value) &&
     ["id", "method", "url", "headersText", "body"].every((key) => typeof value[key] === "string") &&
+    (value.rawRequest === undefined || typeof value.rawRequest === "string") &&
+    (value.targetOrigin === undefined || typeof value.targetOrigin === "string") &&
     typeof value.useProxy === "boolean" &&
     typeof value.insecure === "boolean"
   );

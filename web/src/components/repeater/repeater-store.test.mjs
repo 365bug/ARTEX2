@@ -21,6 +21,9 @@ const {
   truncateResponse,
 } = require("./repeater-state.ts");
 const {
+  requestFromEvidence,
+  buildRawRequest,
+  parseRawRequest,
   joinRequestText,
   splitRequestText,
   requestFromTraffic,
@@ -30,6 +33,7 @@ const {
   parseHeadersText,
   setHostHeader,
 } = require("./repeater-http.ts");
+const { DEFAULT_FILTERS, matchesRepeaterFilters } = require("./repeater-filter.ts");
 const { flush, useRepeaterStore } = require("./repeater-store.ts");
 const { toast } = require("sonner");
 
@@ -413,12 +417,13 @@ test("combined request editing preserves body newlines and splits only the first
 test("traffic import uses captured metadata, preserves Host overrides and the full body", () => {
   const flow = { method: "POST", url: "https://example.test:8443/upload?q=1", host: "example.test" };
   const raw = "POST /upload?q=1 HTTP/1.1\r\nHost: override.test\r\nCookie: a=b\r\n\r\nfirst\r\n\r\nlast\n";
-  assert.deepEqual(requestFromTraffic(raw, flow), {
-    method: "POST",
-    url: flow.url,
-    headersText: "Host: override.test\r\nCookie: a=b",
-    body: "first\r\n\r\nlast\n",
-  });
+  const imported = requestFromTraffic(raw, flow);
+  assert.equal(imported.method, "POST");
+  assert.equal(imported.url, flow.url);
+  assert.equal(imported.headersText, "Host: override.test\r\nCookie: a=b");
+  assert.equal(imported.body, "first\r\n\r\nlast\n");
+  assert.match(imported.rawRequest, /^POST \/upload\?q=1 HTTP\/1.1\n/);
+  assert.equal(imported.targetOrigin, "https://example.test:8443");
   assert.equal(
     requestFromTraffic("POST /upload HTTP/1.1\nContent-Type: text/plain\n\nhello", flow).headersText,
     "Host: example.test:8443\nContent-Type: text/plain",
@@ -436,4 +441,144 @@ test("traffic import rejects failed loads and blob preview markers rather than s
       ),
     /截断预览/,
   );
+});
+
+test("global replay filters combine title, request, response, method, path and status", () => {
+  const tab = {
+    ...defaultWorkspace().tabs[0],
+    title: "上传测试",
+    method: "POST",
+    url: "https://example.test/api/upload?q=1",
+    headersText: "X-Test: RequestSecret",
+    body: "request-body",
+    response: response("ResponseSecret"),
+  };
+  const match = (patch) => matchesRepeaterFilters(tab, { ...DEFAULT_FILTERS, ...patch });
+  assert.equal(match({ query: "上传" }), true);
+  assert.equal(match({ query: "requestsecret" }), true);
+  assert.equal(match({ query: "responseSECRET" }), true);
+  assert.equal(match({ method: "POST", path: "/api/upload", response: "ResponseSecret", status: "2xx" }), true);
+  assert.equal(match({ method: "GET" }), false);
+  assert.equal(match({ path: "example.test" }), false);
+  assert.equal(match({ status: "4xx" }), false);
+  assert.equal(match({ response: "missing" }), false);
+  assert.equal(match({ status: "pending" }), false);
+  assert.equal(matchesRepeaterFilters({ ...tab, response: null }, { ...DEFAULT_FILTERS, status: "pending" }), true);
+  assert.equal(
+    matchesRepeaterFilters(
+      { ...tab, response: { ...response(), status: 0, error: "connection refused" } },
+      { ...DEFAULT_FILTERS, status: "error", response: "refused" },
+    ),
+    true,
+  );
+});
+
+test("bulk move preserves draft, response and inflight requests and persists the whole selection atomically", (t) => {
+  const { store, writes } = setupStore(t);
+  const [first, other] = store.workspace.tabs;
+  store.recordSend(first.id, entry(1, "original response"));
+  store.createGroup("目标组");
+  const groupId = useRepeaterStore.getState().workspace.groups[1].id;
+  store.toggleGroupCollapsed(groupId);
+  const generation = store.beginSend(first.id);
+  const beforeWrites = writes.length;
+  store.setTabsGroup([first.id, other.id], groupId);
+  const state = useRepeaterStore.getState();
+  assert.equal(
+    state.workspace.tabs.every((tab) => tab.groupId === groupId),
+    true,
+  );
+  assert.equal(state.workspace.tabs[0].response.body, "original response");
+  assert.equal(state.workspace.activeTabId, other.id);
+  assert.equal(state.workspace.groups[1].collapsed, false);
+  assert.equal(store.isCurrentSend(first.id, generation), true);
+  assert.equal(writes.length, beforeWrites + 1);
+  store.setTabsGroup([first.id], "missing-group");
+  assert.equal(useRepeaterStore.getState().workspace.tabs[0].groupId, groupId);
+});
+
+test("bulk delete invalidates only removed requests and retains an editable tab after deleting everything", (t) => {
+  const { store } = setupStore(t);
+  const [first, other] = store.workspace.tabs;
+  const thirdId = store.createTab({ body: "keep me" });
+  const firstGeneration = store.beginSend(first.id);
+  const otherGeneration = store.beginSend(other.id);
+  const thirdGeneration = store.beginSend(thirdId);
+  store.setActiveTab(first.id);
+  store.closeTabs([first.id, other.id]);
+  store.completeSend(first.id, firstGeneration, entry(1, "late"));
+  store.completeSend(other.id, otherGeneration, entry(2, "late"));
+  let state = useRepeaterStore.getState();
+  assert.deepEqual(
+    state.workspace.tabs.map((tab) => tab.id),
+    [thirdId],
+  );
+  assert.equal(state.workspace.activeTabId, thirdId);
+  assert.equal(state.workspace.tabs[0].body, "keep me");
+  assert.deepEqual(state.inflight, { [thirdId]: thirdGeneration });
+  store.closeTabs([thirdId]);
+  state = useRepeaterStore.getState();
+  assert.equal(state.workspace.tabs.length, 1);
+  assert.notEqual(state.workspace.tabs[0].id, thirdId);
+  assert.equal(state.workspace.tabs[0].body, "");
+  assert.equal(state.workspace.activeTabId, state.workspace.tabs[0].id);
+  assert.deepEqual(state.inflight, {});
+});
+
+test("raw HTTP editing keeps the first line, method, path, protocol, Host and body together", () => {
+  const tab = {
+    ...defaultWorkspace().tabs[0],
+    method: "POST",
+    url: "https://example.test:8443/api/upload?q=1",
+    headersText: "Host: virtual.test\nContent-Type: text/plain",
+    body: "first\n\nlast",
+  };
+  const raw = buildRawRequest(tab);
+  assert.equal(raw, "POST /api/upload?q=1 HTTP/1.1\nHost: virtual.test\nContent-Type: text/plain\n\nfirst\n\nlast");
+  const parsed = parseRawRequest(
+    raw.replace("POST /api/upload?q=1 HTTP/1.1", "PATCH /api/edited?q=2 HTTP/2.0"),
+    "https://example.test:8443",
+  );
+  assert.deepEqual(parsed, {
+    method: "PATCH",
+    url: "https://example.test:8443/api/edited?q=2",
+    httpVersion: "HTTP/2.0",
+    headersText: tab.headersText,
+    body: tab.body,
+  });
+  assert.equal(parseRawRequest("GET /new HTTP/1.1\nHost: new.test\n\n").url, "https://new.test/new");
+  assert.equal(parseRawRequest("GET /new HTTP/1.1\nHost: newer.test\n\n").url, "https://newer.test/new");
+  assert.equal(
+    parseRawRequest("GET http://elsewhere.test/path HTTP/1.1\nHost: vhost.test\n\n", "https://old.test").url,
+    "http://elsewhere.test/path",
+  );
+  assert.throws(() => parseRawRequest("POST /missing-version\nHost: test\n\n"), /首行/);
+  assert.equal(buildRawRequest({ ...tab, rawRequest: "unfinished HTTP draft" }), "unfinished HTTP draft");
+});
+
+test("raw request drafts and connection origins survive persistence and history restoration", (t) => {
+  const { store } = setupStore(t);
+  const id = store.workspace.tabs[0].id;
+  const rawRequest = "POST /unfinished HTTP/1.";
+  store.updateTab(id, { rawRequest, targetOrigin: "http://example.test:8080" });
+  const loaded = deserializeWorkspace(serializeWorkspace(useRepeaterStore.getState().workspace));
+  assert.equal(loaded.tabs[0].rawRequest, rawRequest);
+  assert.equal(loaded.tabs[0].targetOrigin, "http://example.test:8080");
+  store.recordSend(id, {
+    ...entry(1),
+    rawRequest: "POST /old HTTP/1.1\nHost: example.test\n\nbody",
+    targetOrigin: "https://example.test",
+  });
+  assert.equal(
+    useRepeaterStore.getState().workspace.tabs[0].history[0].rawRequest.startsWith("POST /old HTTP/1.1"),
+    true,
+  );
+});
+
+test("evidence import preserves captured request line and protocol rather than removing it", () => {
+  const initial = { method: "GET", url: "https://example.test/path", headersText: "Host: example.test", body: "" };
+  const imported = requestFromEvidence(initial, "GET /path HTTP/2.0\r\nHost: example.test\r\n");
+  assert.equal(imported.rawRequest, "GET /path HTTP/2.0\nHost: example.test\n\n");
+  assert.equal(imported.targetOrigin, "https://example.test");
+  assert.equal(buildRawRequest(imported), imported.rawRequest);
 });
