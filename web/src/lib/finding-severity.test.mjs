@@ -66,3 +66,47 @@ test("filtering and sorting preserve the polling snapshot", () => {
   filterAndSortFindings(snapshot, "high", "asc");
   assert.deepEqual(snapshot, before);
 });
+
+test("keywords match each searchable field as a trimmed, case-insensitive substring", () => {
+  for (const field of ["name", "vulnclass", "summary", "evidence"]) {
+    const match = finding("match", "high", rows[0].ts, { [field]: "prefix NeEdLe suffix" });
+    assert.deepEqual(filterAndSortFindings([rows[0], match], "all", "desc", "  nEEdle  "), [match]);
+  }
+});
+
+test("unmatched keywords and missing searchable fields return no matches", () => {
+  const missing = finding("missing", "high", rows[0].ts, {
+    name: undefined,
+    vulnclass: undefined,
+    summary: undefined,
+    evidence: undefined,
+  });
+  assert.deepEqual(filterAndSortFindings([...rows, missing], "all", "desc", "needle"), []);
+  assert.deepEqual(filterAndSortFindings([], "all", "desc", "needle"), []);
+});
+
+test("undefined, empty and whitespace keywords preserve severity filtering and sorting", () => {
+  for (const query of [undefined, "", "  \t\n  "]) {
+    for (const severity of ["all", "high"]) {
+      for (const direction of ["asc", "desc"]) {
+        assert.deepEqual(
+          filterAndSortFindings(rows, severity, direction, query),
+          filterAndSortFindings(rows, severity, direction),
+        );
+      }
+    }
+  }
+});
+
+test("keywords combine with severity and preserve time ordering for inherited reports", () => {
+  const matches = rows.map((row) => ({ ...row, evidence: "Shared keyword" }));
+  assert.deepEqual(
+    filterAndSortFindings(matches, "high", "desc", "KEYWORD").map((row) => row.id),
+    ["5", "2"],
+  );
+  assert.deepEqual(
+    filterAndSortFindings(matches, "high", "asc", "keyword").map((row) => row.id),
+    ["2", "5"],
+  );
+  assert.deepEqual(filterAndSortFindings(matches, "high", "desc", "absent"), []);
+});
