@@ -1860,3 +1860,41 @@ export interface IntelligencePage {
   counts: Record<IntelligenceKind, number>;
   enabled: boolean;
 }
+
+// ---- 出口代理连通性测试（POST /api/settings/proxy/test）----
+export interface EgressProbeResult {
+  ok: boolean;
+  exit_ip?: string;
+  via?: "direct" | "http" | "https" | "socks5";
+  via_label?: string;
+  latency_ms: number;
+  error?: string;
+  // 每个地址的明细：区分"连不上代理"和"代理通但出不了网"。
+  probes: {
+    url: string;
+    ok: boolean;
+    ip?: string;
+    latency_ms: number;
+    error?: string;
+  }[];
+}
+
+// 报告里的一行：① 直连 / ② 经全局代理。
+export interface EgressCheck {
+  key: "direct" | "global";
+  label: string;
+  path?: string;
+  skipped?: boolean;
+  skip_reason?: string;
+  result: EgressProbeResult;
+}
+
+export interface EgressReport {
+  ok: boolean;
+  capture: boolean;
+  configured: string;
+  // agent_proxy 是 Agent 实际使用的代理地址：捕获开时是流量捕获的地址，不是输入框里的值。
+  agent_proxy: string;
+  checks: EgressCheck[];
+  warnings?: string[];
+}

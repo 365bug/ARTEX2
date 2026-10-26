@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
-import type { LLMProfile, Settings, WorkerPool } from "@/lib/types";
+import type { EgressReport, LLMProfile, Settings, WorkerPool } from "@/lib/types";
 
 import { BasicAuthCard } from "./_components/basic-auth-card";
 import { UpdateCard } from "./_components/update-card";
@@ -38,6 +38,11 @@ export default function SystemSettingsPage() {
   const [savingProxy, setSavingProxy] = React.useState(false);
   const [globalProxyInput, setGlobalProxyInput] = React.useState("");
   const [savingGlobalProxy, setSavingGlobalProxy] = React.useState(false);
+  // 出口探测：测一次真实请求，拿到"直连 / 经全局代理"两条出口 IP。
+  const [egressTesting, setEgressTesting] = React.useState(false);
+  const [egressReport, setEgressReport] = React.useState<EgressReport | null>(null);
+  // 探测地址：留空用公网回显；隔离网填内网回显服务。
+  const [egressProbeUrl, setEgressProbeUrl] = React.useState("");
   const [testing, setTesting] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
@@ -178,7 +183,11 @@ export default function SystemSettingsPage() {
     setSaving(true);
     api
       .setSettings({ traffic_capture: v })
-      .then(apply)
+      .then((s) => {
+        apply(s);
+        // 捕获开关一变，② 的链路就变了，旧结果不能留。
+        setEgressReport(null);
+      })
       .catch(() => setTrafficCapture(!v)) // revert on failure
       .finally(() => setSaving(false));
   };
@@ -292,10 +301,38 @@ export default function SystemSettingsPage() {
       .setSettings({ global_proxy: globalProxyInput.trim() })
       .then((s) => {
         apply(s);
+        // 保存后链路变了，旧结果（尤其"尚未保存"）立刻失效。
+        setEgressReport(null);
         toast.success(globalProxyInput.trim() ? "已保存全局代理" : "已清除全局代理（改为直连）");
       })
       .catch((e) => toast.error("保存失败：" + (e as Error).message))
       .finally(() => setSavingGlobalProxy(false));
+  };
+
+  // 测表单里当前的值，不要求先保存；后端返回直连 / 经代理两条。
+  const testEgress = () => {
+    setEgressTesting(true);
+    setEgressReport(null);
+    api
+      .testEgressProxy({
+        global_proxy: globalProxyInput.trim(),
+
+        ...(egressProbeUrl.trim() ? { probe_url: egressProbeUrl.trim() } : {}),
+      })
+      .then((rep) => {
+        setEgressReport(rep);
+        if (rep.ok) {
+          // 先取 ②：直连那行永远成功，先命中它会把直连 IP 当成出口报出去。
+          const hit =
+            rep.checks.find((c) => c.key === "global" && !c.skipped && c.result.ok) ??
+            rep.checks.find((c) => !c.skipped && c.result.ok);
+          toast.success(hit?.result.exit_ip ? `出口 IP ${hit.result.exit_ip}` : "探测通过");
+        } else {
+          toast.error("出口探测失败");
+        }
+      })
+      .catch((e) => toast.error("探测失败：" + (e as Error).message))
+      .finally(() => setEgressTesting(false));
   };
 
   // Run a real "test" search ("test") against the CURRENT form values (backend +
@@ -417,8 +454,8 @@ export default function SystemSettingsPage() {
               开启<b>流量捕获</b>时，它作为记录代理的<b>上游</b>（流量仍全量落库，再经此代理出网）；关闭捕获时，直接注入
               Agent 的 bash / WebFetch 出网。与网络搜索代理、LLM 代理相互独立。
               <br />
-              <b>提示</b>：socks5 在<b>关闭捕获</b>时依赖各命令行工具对 <code>ALL_PROXY</code> 的支持（curl
-              可用，部分工具可能忽略）； 若主要用 socks5，建议开启流量捕获——此路径由 MITM
+              <b>提示</b>：socks5 在<b>关闭捕获</b>时依赖各命令行工具对 <code>ALL_PROXY</code> 的支持——curl
+              可用，python urllib 等会直接报错； 若主要用 socks5，建议开启流量捕获——此路径由 MITM
               亲自拨号，工具无感知、稳定生效。
             </CardDescription>
           </CardHeader>
@@ -433,15 +470,122 @@ export default function SystemSettingsPage() {
                 placeholder="socks5://user:pass@host:1080 或 http://host:port（留空=直连）"
                 value={globalProxyInput}
                 disabled={!loaded || savingGlobalProxy}
-                onChange={(e) => setGlobalProxyInput(e.target.value)}
+                onChange={(e) => {
+                  setGlobalProxyInput(e.target.value);
+
+                  setEgressReport(null);
+                }}
               />
               <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
                 保存
+              </Button>
+              {/* 测表单里当前的值，不要求先保存。 */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={testEgress}
+                disabled={!loaded || egressTesting}
+              >
+                {egressTesting ? "测试中…" : "测试"}
               </Button>
             </div>
             <p className="text-muted-foreground text-xs">
               {globalProxyInput.trim() ? "已配置 · 所有目标流量经此代理出网" : "未配置 · 目标流量直连出网"}
             </p>
+            {/* 紧贴结果区：用户看两行时正好需要它。细节放文档。 */}
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              点<b>测试</b>会访问 IP 回显服务（默认 <code>api.ipify.org</code>，失败自动换{" "}
+              <code>ifconfig.me</code>），它返回"这个请求从哪个 IP 来"。
+              ① 是不走代理时的 IP，② 是经全局代理出网时的 IP。改完不用先保存，直接测。
+            </p>
+            {/* 内网里公网回显不可达，两行都会失败——不是代理坏了。 */}
+            <details className="text-xs">
+              <summary className="text-muted-foreground cursor-pointer select-none">
+                自定义 IP 探测服务（可选）
+              </summary>
+              <div className="mt-2 flex flex-col gap-1">
+                <Input
+                  autoComplete="off"
+                  placeholder="留空 = 使用默认的公共 IP 回显服务；内网可填 http://<内网IP>:<端口>/"
+                  value={egressProbeUrl}
+                  onChange={(e) => {
+                    setEgressProbeUrl(e.target.value);
+                    setEgressReport(null);
+                  }}
+                />
+                <span className="text-muted-foreground leading-relaxed">
+                  自定义 IP 探测服务需返回纯文本 IP 或{" "}
+                  <code>{'{"ip":"1.2.3.4"}'}</code> 格式的 JSON。
+                  若内网环境下无法访问公网，或本机和内网代理共用同一个公网出口，
+                  则可替换为内网 IP 探测服务，此时 ① 和 ② 的 IP 不同，就说明流量走了内网代理。
+                </span>
+              </div>
+            </details>
+            {egressReport && (
+              <div className="flex flex-col gap-1 text-xs">
+                {egressReport.checks.map((c) => {
+                  // 经 MITM 时 via 是 HTTP（MITM 自己是代理），标出来会让人以为填错了。
+                  const viaCapture = !!c.path && c.path !== egressReport.configured;
+                  return (
+                    <div key={c.key} className="flex flex-wrap items-center gap-x-2">
+                      <span
+                        className={
+                          c.skipped
+                            ? "text-muted-foreground"
+                            : c.result.ok
+                              ? "text-emerald-600"
+                              : "text-destructive"
+                        }
+                      >
+                        {c.skipped ? "—" : c.result.ok ? "✓" : "✗"}
+                      </span>
+
+                      <span
+                        className="w-56 shrink-0"
+                        title={
+                          c.key === "direct"
+                            ? "不经过任何代理，用来和 ② 对比"
+                            : viaCapture
+                              ? `实际探测地址：${c.path}（请求经流量捕获转发）`
+                              : "经这个代理出去，不需要先保存"
+                        }
+                      >
+                        {c.label}
+                      </span>
+                      {c.skipped ? (
+                        <span className="text-muted-foreground">{c.skip_reason}</span>
+                      ) : c.result.ok ? (
+                        <span className="font-mono">
+                          <span title="外界看到的出口 IP（探测站点回显的客户端地址）">
+                            {c.result.exit_ip}
+                          </span>{" "}
+                          ·{" "}
+                          <span title="从 ARTEX 发出请求到拿到响应的完整往返耗时；经代理时包含代理那一跳">
+                            {c.result.latency_ms}ms
+                          </span>
+                          {c.result.via && c.result.via !== "direct" && !viaCapture && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · 经 {c.result.via_label ?? c.result.via}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        // 只显示第一个地址的原因：refused=代理没开，timeout=出不了网。
+                        <span className="text-destructive">
+                          {c.result.probes?.find((p) => p.error)?.error ?? c.result.error}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                {egressReport.warnings?.map((w) => (
+                  <p key={w} className="text-amber-700">
+                    ⚠ {w}
+                  </p>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

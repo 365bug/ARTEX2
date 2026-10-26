@@ -897,6 +897,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/notify/deliveries", s.notifyListDeliveries)
 	mux.HandleFunc("POST /api/notify/deliveries/{id}/retry", s.notifyRetryDelivery)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
+	// 出口代理连通性测试：发真实请求验证 global_proxy 是否可用，并回显出口 IP。
+	mux.HandleFunc("POST /api/settings/proxy/test", s.testEgressProxy)
 	mux.HandleFunc("GET /api/report", s.getReport)
 	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
 	mux.HandleFunc("POST /api/chat", s.chat)
