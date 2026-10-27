@@ -951,6 +951,11 @@ function controlMockTask(id: string, action: "pause" | "resume"): BatchControlIt
     task.queued = false;
     task.status = "paused";
     task.engine_mode = "paused";
+    if (task.run_segment_started_unix && task.run_segment_started_unix > 0) {
+      task.active_run_seconds = (task.active_run_seconds ?? 0) + Math.max(0, Math.floor(Date.now() / 1000) - task.run_segment_started_unix);
+      task.run_seconds = task.active_run_seconds;
+    }
+    task.run_segment_started_unix = 0;
   } else {
     if (!task.paused && task.status !== "paused") {
       return { id, ok: false, status: task.status, error: "任务未暂停" };
@@ -959,6 +964,7 @@ function controlMockTask(id: string, action: "pause" | "resume"): BatchControlIt
     task.queued = false;
     task.status = "running";
     task.engine_mode = "exploring";
+    task.run_segment_started_unix = Math.floor(Date.now() / 1000);
   }
   return { id, ok: true, status: task.status, queued: false };
 }
@@ -1248,6 +1254,9 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       status: "created",
       created_at: now.toISOString(),
       created_unix: Math.floor(now.getTime() / 1000),
+      active_run_seconds: 0,
+      run_segment_started_unix: 0,
+      run_seconds: 0,
       paused: false,
       active: true,
       in_flight: 0,

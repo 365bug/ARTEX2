@@ -1138,7 +1138,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		metric := metrics[t.ExpID]
 		dto.Tokens = tokenTotalDTO(metric.Tokens)
 		// prefer the live in-memory heartbeat (fresher) and fall back to the
-		// persisted max activity time (survives restarts) for run-duration display.
+		// persisted max activity time (survives restarts) for activity display.
 		dto.LastActivity = metric.LastActivity
 		if live := s.engine.LastActivity(t.ID); live > dto.LastActivity {
 			dto.LastActivity = live

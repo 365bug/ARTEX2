@@ -175,10 +175,9 @@ func (s *Server) delegateToTask(ctx context.Context, in json.RawMessage, pick fu
 
 func (s *Server) toolListTasks() actool.CoreTool {
 	return roTool("list_tasks",
-		"列出所有任务(id/描述/目标/状态/运行时长/父任务/LLM 配置)，编排 agent 用它掌握全局、看哪些任务卡太久、各自用哪个 LLM。运行时长：运行中=创建→现在，终态=创建→最后活动(秒)。llm_profile：任务 planner/worker 用的配置名，(激活配置)=跟随全局激活。",
+		"列出所有任务(id/描述/目标/状态/运行时长/父任务/LLM 配置)，编排 agent 用它掌握全局、看哪些任务卡太久、各自用哪个 LLM。运行时长只累计实际执行时间，暂停、排队和终态后的时间不计入。llm_profile：任务 planner/worker 用的配置名，(激活配置)=跟随全局激活。",
 		objSchema(map[string]any{}),
 		func(context.Context, json.RawMessage) (actool.Result, error) {
-			lastAct, _ := s.m.PG().LastActivityAll()
 			// id -> name to resolve each task's pinned LLM profile.
 			profName := map[int64]string{}
 			if profs, err := s.m.pg.ListProfiles(); err == nil {
@@ -189,16 +188,8 @@ func (s *Server) toolListTasks() actool.CoreTool {
 			out := make([]map[string]any, 0)
 			for _, t := range s.m.List() {
 				status := s.deriveTaskStatus(t)
-				end := lastAct[t.ExpID]
-				if live := s.engine.LastActivity(t.ID); live > end {
-					end = live
-				}
-				dur := int64(0)
-				if status == "running" {
-					dur = time.Now().Unix() - t.CreatedAt
-				} else if end > t.CreatedAt {
-					dur = end - t.CreatedAt
-				}
+				lifecycle := t.lifecycleSnapshot()
+				dur := taskRunSeconds(lifecycle.ActiveRunSeconds, lifecycle.RunSegmentStartedAt, time.Now().Unix(), status, lifecycle.Paused, lifecycle.Queued)
 				row := map[string]any{"id": t.ID, "description": t.Description, "goal": t.Goal, "status": status, "run_seconds": dur}
 				if t.ParentRef != "" {
 					row["parent_ref"] = t.ParentRef
