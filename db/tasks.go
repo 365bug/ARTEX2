@@ -42,9 +42,11 @@ type Task struct {
 	CreatedAt          time.Time  `json:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。
-	TimeoutSeconds int        `json:"timeout_seconds"`        // 0=不限时
-	FirstRunAt     *time.Time `json:"first_run_at,omitempty"` // 首次真正开始运行的时刻(非 created_at);nil=尚未运行
-	DeadlineAt     *time.Time `json:"deadline_at,omitempty"`  // = first_run_at + timeout_seconds;nil=不限或未运行
+	TimeoutSeconds      int        `json:"timeout_seconds"`        // 0=不限时
+	FirstRunAt          *time.Time `json:"first_run_at,omitempty"` // 首次真正开始运行的时刻(非 created_at);nil=尚未运行
+	DeadlineAt          *time.Time `json:"deadline_at,omitempty"`  // = first_run_at + timeout_seconds;nil=不限或未运行
+	ActiveRunSeconds    int64      `json:"active_run_seconds"`
+	RunSegmentStartedAt *time.Time `json:"run_segment_started_at,omitempty"`
 	// planner 心跳触发间隔(秒)：距上轮 plan 结束/任务开始满该值且期间无触发 → 触发一轮。
 	// 下限=默认=300(5min)，低于一律抬到 300(在 CreateTask 归一)。见 docs/planner-trigger-impl-plan.md
 	PlanHeartbeatSeconds int `json:"plan_heartbeat_seconds"`
@@ -403,11 +405,11 @@ func insertTaskLLMProfiles(tx *sql.Tx, taskID int64, profileIDs []int64) error {
 
 const taskCols = `id, COALESCE(name,''), remark, category_id,
 COALESCE((SELECT category.name FROM task_categories category WHERE category.id=tasks.category_id),''),
-description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), COALESCE(worker_count,0), first_run_at, deadline_at`
+description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), COALESCE(worker_count,0), first_run_at, deadline_at, COALESCE(active_run_seconds,0), run_segment_started_at`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Name, &t.Remark, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.WorkerCount, &t.FirstRunAt, &t.DeadlineAt); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.Remark, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.WorkerCount, &t.FirstRunAt, &t.DeadlineAt, &t.ActiveRunSeconds, &t.RunSegmentStartedAt); err != nil {
 		return nil, err
 	}
 	t.Pinned = t.PinnedAt != nil
@@ -497,6 +499,44 @@ func (d *DB) SetPaused(id int64, paused bool) error {
 	return err
 }
 
+// StartTaskRunSegment begins the currently active execution segment. It is
+// idempotent and refuses to start while a task is paused or waiting in the
+// concurrency queue.
+func (d *DB) StartTaskRunSegment(id int64) (int64, *time.Time, error) {
+	var active int64
+	var started *time.Time
+	err := d.QueryRow(`UPDATE tasks
+SET run_segment_started_at=COALESCE(run_segment_started_at, now())
+WHERE id=$1 AND deleted_at IS NULL AND status IN ('created','running') AND NOT paused AND NOT queued
+RETURNING active_run_seconds, run_segment_started_at`, id).Scan(&active, &started)
+	if err == sql.ErrNoRows {
+		err = d.QueryRow(`SELECT active_run_seconds, run_segment_started_at FROM tasks WHERE id=$1`, id).Scan(&active, &started)
+		if err == sql.ErrNoRows {
+			return 0, nil, nil
+		}
+	}
+	return active, started, err
+}
+
+// FinalizeTaskRunSegment folds the current segment into active_run_seconds.
+// A NULL segment makes this a safe no-op for repeated pause/terminal calls.
+func (d *DB) FinalizeTaskRunSegment(id int64) (int64, *time.Time, error) {
+	var active int64
+	var started *time.Time
+	err := d.QueryRow(`UPDATE tasks
+SET active_run_seconds=active_run_seconds + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint),
+    run_segment_started_at=NULL
+WHERE id=$1 AND run_segment_started_at IS NOT NULL
+RETURNING active_run_seconds, run_segment_started_at`, id).Scan(&active, &started)
+	if err == sql.ErrNoRows {
+		err = d.QueryRow(`SELECT active_run_seconds, run_segment_started_at FROM tasks WHERE id=$1`, id).Scan(&active, &started)
+		if err == sql.ErrNoRows {
+			return 0, nil, nil
+		}
+	}
+	return active, started, err
+}
+
 // Enqueue places a task at the tail of the persistent admission queue. Repeating
 // the operation while it is already queued keeps its original FIFO position.
 func (d *DB) Enqueue(id int64, mode string) error {
@@ -506,6 +546,8 @@ func (d *DB) Enqueue(id int64, mode string) error {
 	_, err := d.Exec(`UPDATE tasks
 SET queued=true,
     queued_at=CASE WHEN queued THEN COALESCE(queued_at, now()) ELSE now() END,
+    active_run_seconds=active_run_seconds + CASE WHEN run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
+    run_segment_started_at=NULL,
     queue_mode=CASE
         WHEN queue_mode='bootstrap' OR $2='bootstrap' THEN 'bootstrap'
         ELSE 'resume'
@@ -542,7 +584,9 @@ func (d *DB) SetStatus(id int64, status string) error {
 	_, err := d.Exec(`
 UPDATE tasks
    SET status = $1,
-       completed_at = CASE WHEN $1 IN ('done','failed','timeout') THEN COALESCE(completed_at, now()) ELSE NULL END
+       completed_at = CASE WHEN $1 IN ('done','failed','timeout') THEN COALESCE(completed_at, now()) ELSE NULL END,
+       active_run_seconds = active_run_seconds + CASE WHEN $1 IN ('done','failed','timeout') AND run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
+       run_segment_started_at = CASE WHEN $1 IN ('done','failed','timeout') THEN NULL ELSE run_segment_started_at END
  WHERE id = $2`, status, id)
 	return err
 }
@@ -555,7 +599,9 @@ func (d *DB) SetTerminalStatusGuarded(id int64, status string) (won bool, err er
 	res, err := d.Exec(`
 UPDATE tasks
    SET status = $1,
-       completed_at = COALESCE(completed_at, now())
+       completed_at = COALESCE(completed_at, now()),
+       active_run_seconds = active_run_seconds + CASE WHEN run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
+       run_segment_started_at = NULL
  WHERE id = $2 AND status NOT IN ('done','failed','timeout')`, status, id)
 	if err != nil {
 		return false, err

@@ -34,10 +34,13 @@ export interface Task {
   goal: string;
   status: TaskStatus;
   created_at: string;
-  created_unix?: number; // created_at as unix seconds (run-duration calc)
+  created_unix?: number;
   completed_at?: string; // RFC3339 finish time (done/failed); "" if unfinished
   completed_unix?: number; // completed_at as unix seconds (0/undef if unfinished)
   last_activity_unix?: number; // unix seconds of the last activity (0/undef if none)
+  run_seconds?: number; // backend-computed active runtime seconds
+  active_run_seconds?: number; // completed running segments in seconds
+  run_segment_started_unix?: number; // current running segment start; 0 when inactive
   paused?: boolean;
   queued?: boolean;
   active?: boolean;

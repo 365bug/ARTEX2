@@ -63,6 +63,8 @@ type Task struct {
 	WorkerCount          int                    `json:"worker_count"`           // 本任务 Worker 数;0=用全局默认
 	FirstRunAt           int64                  `json:"first_run_at,omitempty"`
 	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
+	ActiveRunSeconds     int64                  `json:"active_run_seconds"`
+	RunSegmentStartedAt  int64                  `json:"run_segment_started_at,omitempty"`
 	Store                *pgdb.ExplorationStore `json:"-"`
 	Guard                *guard.Guard           `json:"-"`
 	notify               chan struct{}
@@ -81,21 +83,23 @@ type Task struct {
 // updateLifecycle instead of reading or writing the corresponding Task fields
 // directly after the task has been published by Manager.
 type taskLifecycleState struct {
-	Name          string
-	Remark        string
-	PinnedAt      int64
-	Status        string
-	Paused        bool
-	Queued        bool
-	QueuedAt      int64
-	QueueMode     string
-	CompletedAt   int64
-	FirstRunAt    int64
-	DeadlineAt    int64
-	SourceTaskIDs []int64
-	CompanyIDs    []int64
-	CategoryID    *int64
-	CategoryName  string
+	Name                string
+	Remark              string
+	PinnedAt            int64
+	Status              string
+	Paused              bool
+	Queued              bool
+	QueuedAt            int64
+	QueueMode           string
+	CompletedAt         int64
+	FirstRunAt          int64
+	DeadlineAt          int64
+	ActiveRunSeconds    int64
+	RunSegmentStartedAt int64
+	SourceTaskIDs       []int64
+	CompanyIDs          []int64
+	CategoryID          *int64
+	CategoryName        string
 }
 
 func (t *Task) lifecycleSnapshot() taskLifecycleState {
@@ -109,21 +113,23 @@ func (t *Task) lifecycleSnapshot() taskLifecycleState {
 
 func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 	return taskLifecycleState{
-		Name:          t.Name,
-		Remark:        t.Remark,
-		PinnedAt:      t.PinnedAt,
-		Status:        t.Status,
-		Paused:        t.Paused,
-		Queued:        t.Queued,
-		QueuedAt:      t.QueuedAt,
-		QueueMode:     t.QueueMode,
-		CompletedAt:   t.CompletedAt,
-		FirstRunAt:    t.FirstRunAt,
-		DeadlineAt:    t.DeadlineAt,
-		SourceTaskIDs: append([]int64(nil), t.SourceTaskIDs...),
-		CompanyIDs:    append([]int64(nil), t.CompanyIDs...),
-		CategoryID:    cloneInt64Ptr(t.CategoryID),
-		CategoryName:  t.CategoryName,
+		Name:                t.Name,
+		Remark:              t.Remark,
+		PinnedAt:            t.PinnedAt,
+		Status:              t.Status,
+		Paused:              t.Paused,
+		Queued:              t.Queued,
+		QueuedAt:            t.QueuedAt,
+		QueueMode:           t.QueueMode,
+		CompletedAt:         t.CompletedAt,
+		FirstRunAt:          t.FirstRunAt,
+		DeadlineAt:          t.DeadlineAt,
+		ActiveRunSeconds:    t.ActiveRunSeconds,
+		RunSegmentStartedAt: t.RunSegmentStartedAt,
+		SourceTaskIDs:       append([]int64(nil), t.SourceTaskIDs...),
+		CompanyIDs:          append([]int64(nil), t.CompanyIDs...),
+		CategoryID:          cloneInt64Ptr(t.CategoryID),
+		CategoryName:        t.CategoryName,
 	}
 }
 
@@ -145,6 +151,8 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 	t.CompletedAt = state.CompletedAt
 	t.FirstRunAt = state.FirstRunAt
 	t.DeadlineAt = state.DeadlineAt
+	t.ActiveRunSeconds = state.ActiveRunSeconds
+	t.RunSegmentStartedAt = state.RunSegmentStartedAt
 	t.SourceTaskIDs = append(t.SourceTaskIDs[:0], state.SourceTaskIDs...)
 	t.CompanyIDs = append(t.CompanyIDs[:0], state.CompanyIDs...)
 	t.CategoryID = cloneInt64Ptr(state.CategoryID)
@@ -1008,6 +1016,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
 		CoverageEnabled: pt.CoverageEnabled, WorkerCount: pt.WorkerCount,
 		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
+		ActiveRunSeconds: pt.ActiveRunSeconds, RunSegmentStartedAt: unixOrZero(pt.RunSegmentStartedAt),
 		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}
 }
@@ -1330,7 +1339,8 @@ func (m *Manager) applyTaskAdmission(id, expectedStatus, status string, queued b
 		mode = ""
 	}
 
-	var queuedAt, completedAt, firstRunAt, deadlineAt sql.NullTime
+	var queuedAt, completedAt, firstRunAt, deadlineAt, segmentStartedAt sql.NullTime
+	var activeRunSeconds int64
 	var committedMode string
 	err = m.pg.QueryRow(`UPDATE tasks
 	SET status=$2,
@@ -1359,9 +1369,11 @@ func (m *Manager) applyTaskAdmission(id, expectedStatus, status string, queued b
 	        WHEN $6='timeout' AND $2 NOT IN ('done','failed','timeout') THEN NULL
 	        ELSE deadline_at
 	    END
+	    ,active_run_seconds=active_run_seconds + CASE WHEN ($3 OR $2 IN ('done','failed','timeout')) AND run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END
+	    ,run_segment_started_at=CASE WHEN $3 OR $2 IN ('done','failed','timeout') THEN NULL ELSE run_segment_started_at END
 	WHERE id=$1 AND deleted_at IS NULL AND status=$6
-	RETURNING queued_at, queue_mode, completed_at, first_run_at, deadline_at`, n, status, queued, mode, preservePosition, expectedStatus, manualUntil).
-		Scan(&queuedAt, &committedMode, &completedAt, &firstRunAt, &deadlineAt)
+	RETURNING queued_at, queue_mode, completed_at, first_run_at, deadline_at, active_run_seconds, run_segment_started_at`, n, status, queued, mode, preservePosition, expectedStatus, manualUntil).
+		Scan(&queuedAt, &committedMode, &completedAt, &firstRunAt, &deadlineAt, &activeRunSeconds, &segmentStartedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("task %s lifecycle changed before admission (expected status %q)", id, expectedStatus)
 	}
@@ -1392,6 +1404,11 @@ func (m *Manager) applyTaskAdmission(id, expectedStatus, status string, queued b
 			if deadlineAt.Valid {
 				state.DeadlineAt = deadlineAt.Time.Unix()
 			}
+			state.ActiveRunSeconds = activeRunSeconds
+			state.RunSegmentStartedAt = 0
+			if segmentStartedAt.Valid {
+				state.RunSegmentStartedAt = segmentStartedAt.Time.Unix()
+			}
 		})
 	}
 	m.mu.Unlock()
@@ -1412,11 +1429,15 @@ func (m *Manager) ApplyTaskPauseOrigin(id string, scheduled bool) error {
 		return err
 	}
 	var mode string
+	var activeRunSeconds int64
+	var segmentStartedAt sql.NullTime
 	err = m.pg.QueryRow(`UPDATE tasks
-		SET paused=true, queued=false, queued_at=NULL, schedule_paused=$2, schedule_manual_until=NULL
+		SET paused=true, queued=false, queued_at=NULL, schedule_paused=$2, schedule_manual_until=NULL,
+		    active_run_seconds=active_run_seconds + CASE WHEN run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
+		    run_segment_started_at=NULL
 		WHERE id=$1 AND deleted_at IS NULL AND paused=false
 		  AND status NOT IN ('done','failed','timeout')
-		RETURNING COALESCE(queue_mode,'')`, n, scheduled).Scan(&mode)
+		RETURNING COALESCE(queue_mode,''), active_run_seconds, run_segment_started_at`, n, scheduled).Scan(&mode, &activeRunSeconds, &segmentStartedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("task %s is unavailable for pause", id)
 	}
@@ -1430,6 +1451,11 @@ func (m *Manager) ApplyTaskPauseOrigin(id string, scheduled bool) error {
 			state.Queued = false
 			state.QueuedAt = 0
 			state.QueueMode = mode
+			state.ActiveRunSeconds = activeRunSeconds
+			state.RunSegmentStartedAt = 0
+			if segmentStartedAt.Valid {
+				state.RunSegmentStartedAt = segmentStartedAt.Time.Unix()
+			}
 		})
 	}
 	m.mu.Unlock()
@@ -1448,16 +1474,20 @@ func (m *Manager) EnqueueTask(id, mode string) error {
 		return fmt.Errorf("invalid queue mode %q", mode)
 	}
 	var queuedAt time.Time
+	var activeRunSeconds int64
+	var segmentStartedAt sql.NullTime
 	var committedMode string
 	err = m.pg.QueryRow(`UPDATE tasks
 		SET queued=true,
 		    queued_at=CASE WHEN queued THEN COALESCE(queued_at, now()) ELSE now() END,
+		    active_run_seconds=active_run_seconds + CASE WHEN run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
+		    run_segment_started_at=NULL,
 		    queue_mode=CASE
 		        WHEN queue_mode='bootstrap' OR $2='bootstrap' THEN 'bootstrap'
 		        ELSE 'resume'
 		    END
 		WHERE id=$1 AND deleted_at IS NULL
-		RETURNING queued_at, queue_mode`, n, mode).Scan(&queuedAt, &committedMode)
+		RETURNING queued_at, queue_mode, active_run_seconds, run_segment_started_at`, n, mode).Scan(&queuedAt, &committedMode, &activeRunSeconds, &segmentStartedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("task %s is unavailable for enqueue", id)
 	}
@@ -1470,6 +1500,80 @@ func (m *Manager) EnqueueTask(id, mode string) error {
 			state.QueuedAt = queuedAt.UnixNano()
 			state.Queued = true
 			state.QueueMode = committedMode
+			state.ActiveRunSeconds = activeRunSeconds
+			state.RunSegmentStartedAt = 0
+			if segmentStartedAt.Valid {
+				state.RunSegmentStartedAt = segmentStartedAt.Time.Unix()
+			}
+		})
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// StartTaskRunSegment records the start of actual execution, once the engine
+// has admitted a task and is about to run planner/worker work.
+func (m *Manager) StartTaskRunSegment(id string) error {
+	m.taskStateMu.Lock()
+	defer m.taskStateMu.Unlock()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return err
+	}
+	m.mu.RLock()
+	if t := m.tasks[id]; t != nil && t.lifecycleSnapshot().RunSegmentStartedAt > 0 {
+		m.mu.RUnlock()
+		return nil
+	}
+	m.mu.RUnlock()
+	active, started, err := m.pg.StartTaskRunSegment(n)
+	if err != nil {
+		return err
+	}
+	if started != nil {
+		m.mirrorTaskRuntime(id, active, started)
+	}
+	return nil
+}
+
+// FinalizeTaskRunSegment is idempotent and is used by pause/terminal paths that
+// may race with a late engine cancellation.
+func (m *Manager) FinalizeTaskRunSegment(id string) error {
+	m.taskStateMu.Lock()
+	defer m.taskStateMu.Unlock()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return err
+	}
+	active, started, err := m.pg.FinalizeTaskRunSegment(n)
+	if err != nil {
+		return err
+	}
+	m.mirrorTaskRuntime(id, active, started)
+	return nil
+}
+
+func (m *Manager) mirrorTaskRuntime(id string, active int64, started *time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t := m.tasks[id]; t != nil {
+		t.updateLifecycle(func(state *taskLifecycleState) {
+			state.ActiveRunSeconds = active
+			state.RunSegmentStartedAt = unixOrZero(started)
+		})
+	}
+}
+
+func (m *Manager) syncTaskRuntime(id string, n int64) error {
+	pt, err := m.pg.GetTask(n)
+	if err != nil || pt == nil {
+		return err
+	}
+	m.mu.Lock()
+	if t := m.tasks[id]; t != nil {
+		t.updateLifecycle(func(state *taskLifecycleState) {
+			state.ActiveRunSeconds = pt.ActiveRunSeconds
+			state.RunSegmentStartedAt = unixOrZero(pt.RunSegmentStartedAt)
 		})
 	}
 	m.mu.Unlock()
@@ -1562,6 +1666,9 @@ func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) 
 	if err != nil || !won {
 		return won, err
 	}
+	if err := m.syncTaskRuntime(id, n); err != nil {
+		return false, err
+	}
 	m.mu.Lock()
 	if t := m.tasks[id]; t != nil {
 		t.updateLifecycle(func(state *taskLifecycleState) {
@@ -1585,6 +1692,9 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 		return err
 	}
 	if err := m.pg.SetStatus(n, status); err != nil {
+		return err
+	}
+	if err := m.syncTaskRuntime(id, n); err != nil {
 		return err
 	}
 	m.mu.Lock()
