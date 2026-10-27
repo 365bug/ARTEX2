@@ -8,6 +8,7 @@ import {
   isCompanyScopeKind,
   normalizeCompanyScopeValue,
 } from "../company-scope";
+import { filterAndSortFindings } from "../finding-severity";
 import type {
   Activity,
   ArchiveBatchItem,
@@ -1962,11 +1963,13 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/exploration/finding-case-review" && m === "POST")
     throw new Error("演示模式不执行 Reporter 整理，请在已配置模型的实例中使用");
   if (path === "/exploration/finding-cases" && m === "GET") {
-    const list = mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope"));
-    const ranks = { critical: 4, high: 3, medium: 2, low: 1 } as const;
-    list.sort(
-      (a, b) =>
-        (q.get("sort") === "severity" ? ranks[b.severity] - ranks[a.severity] : 0) || +new Date(b.ts) - +new Date(a.ts),
+    const list = filterAndSortFindings(
+      mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope")),
+      "all",
+      {
+        field: q.get("sort") === "severity" ? "severity" : "time",
+        direction: q.get("time_direction") === "asc" ? "asc" : "desc",
+      },
     );
     const page = Math.max(1, Number(q.get("page")) || 1);
     const size = Math.min(100, Math.max(1, Number(q.get("limit")) || 20));
