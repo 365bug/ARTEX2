@@ -532,6 +532,13 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A live segment cannot be trusted across a process restart: its end time
+	// could be deployment/crash downtime. Clear it before tasks are restored so
+	// the next engine admission starts a fresh segment at actual execution time.
+	if _, err := pg.ClearOpenTaskRunSegments(); err != nil {
+		_ = pg.Close()
+		return nil, fmt.Errorf("clear stale task run segments: %w", err)
+	}
 	if err := pg.RecoverFindingRetests(); err != nil {
 		pg.Close()
 		return nil, fmt.Errorf("recover finding retests: %w", err)
@@ -1297,13 +1304,16 @@ func (m *Manager) SetTaskPaused(id string, paused bool) error {
 	if err != nil {
 		return err
 	}
-	if err := m.pg.SetPaused(n, paused); err != nil {
+	active, started, err := m.pg.SetPausedRuntime(n, paused)
+	if err != nil {
 		return err
 	}
 	m.mu.Lock()
 	if t := m.tasks[id]; t != nil {
 		t.updateLifecycle(func(state *taskLifecycleState) {
 			state.Paused = paused
+			state.ActiveRunSeconds = active
+			state.RunSegmentStartedAt = unixOrZero(started)
 		})
 	}
 	m.mu.Unlock()
@@ -1662,23 +1672,30 @@ func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) 
 	if err != nil {
 		return false, err
 	}
-	won, err = m.pg.SetTerminalStatusGuarded(n, status)
+	active, started, won, err := m.pg.SetTerminalStatusGuardedRuntime(n, status)
 	if err != nil || !won {
 		return won, err
 	}
-	if err := m.syncTaskRuntime(id, n); err != nil {
-		return false, err
-	}
+	// Mirror the committed terminal transition before any optional hydration.
+	// This keeps the in-memory clock stopped even if GetTask later fails.
 	m.mu.Lock()
 	if t := m.tasks[id]; t != nil {
 		t.updateLifecycle(func(state *taskLifecycleState) {
 			state.Status = status
-			if state.CompletedAt == 0 {
-				state.CompletedAt = time.Now().Unix()
+			state.ActiveRunSeconds = active
+			state.RunSegmentStartedAt = unixOrZero(started)
+			if pgdb.IsTerminal(status) {
+				state.RunSegmentStartedAt = 0
+				if state.CompletedAt == 0 {
+					state.CompletedAt = time.Now().Unix()
+				}
 			}
 		})
 	}
 	m.mu.Unlock()
+	if err := m.syncTaskRuntime(id, n); err != nil {
+		return true, err
+	}
 	return true, nil
 }
 
@@ -1691,19 +1708,20 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 	if err != nil {
 		return err
 	}
-	if err := m.pg.SetStatus(n, status); err != nil {
+	active, started, err := m.pg.SetStatusRuntime(n, status)
+	if err != nil {
 		return err
 	}
-	if err := m.syncTaskRuntime(id, n); err != nil {
-		return err
-	}
+	// Mirror the successful UPDATE immediately. A later GetTask hydration is
+	// best-effort and must not reopen a terminal clock in memory.
 	m.mu.Lock()
 	if t := m.tasks[id]; t != nil {
 		t.updateLifecycle(func(state *taskLifecycleState) {
 			state.Status = status
-			// Mirror the DB's completed_at stamp on the live handle so the DTO shows
-			// the finish time without a reload (terminal -> stamp once; else clear).
+			state.ActiveRunSeconds = active
+			state.RunSegmentStartedAt = unixOrZero(started)
 			if pgdb.IsTerminal(status) {
+				state.RunSegmentStartedAt = 0
 				if state.CompletedAt == 0 {
 					state.CompletedAt = time.Now().Unix()
 				}
@@ -1713,6 +1731,9 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 		})
 	}
 	m.mu.Unlock()
+	if err := m.syncTaskRuntime(id, n); err != nil {
+		return err
+	}
 	return nil
 }
 

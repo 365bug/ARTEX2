@@ -495,8 +495,27 @@ func (d *DB) GetTask(id int64) (*Task, error) {
 
 // SetPaused persists a task's paused flag.
 func (d *DB) SetPaused(id int64, paused bool) error {
-	_, err := d.Exec(`UPDATE tasks SET paused=$1 WHERE id=$2`, paused, id)
+	_, _, err := d.SetPausedRuntime(id, paused)
 	return err
+}
+
+// SetPausedRuntime persists a task's paused flag and, when pausing, folds any
+// open execution segment into active_run_seconds. Keeping this in the DB helper
+// makes direct callers safe even when they do not go through Manager pause
+// orchestration.
+func (d *DB) SetPausedRuntime(id int64, paused bool) (int64, *time.Time, error) {
+	var active int64
+	var started *time.Time
+	err := d.QueryRow(`UPDATE tasks
+SET paused=$1,
+    active_run_seconds=active_run_seconds + CASE WHEN $1 AND run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
+    run_segment_started_at=CASE WHEN $1 THEN NULL ELSE run_segment_started_at END
+WHERE id=$2
+RETURNING active_run_seconds, run_segment_started_at`, paused, id).Scan(&active, &started)
+	if err == sql.ErrNoRows {
+		return 0, nil, nil
+	}
+	return active, started, err
 }
 
 // StartTaskRunSegment begins the currently active execution segment. It is
@@ -581,14 +600,27 @@ func (d *DB) SetQueued(id int64, queued bool) error {
 // stable); moving back to a non-terminal state clears it, so a re-run has no stale
 // finish time.
 func (d *DB) SetStatus(id int64, status string) error {
-	_, err := d.Exec(`
+	_, _, err := d.SetStatusRuntime(id, status)
+	return err
+}
+
+// SetStatusRuntime updates a task status and returns the committed runtime
+// fields from the same UPDATE. Terminal transitions finalize any open segment.
+func (d *DB) SetStatusRuntime(id int64, status string) (int64, *time.Time, error) {
+	var active int64
+	var started *time.Time
+	err := d.QueryRow(`
 UPDATE tasks
    SET status = $1,
        completed_at = CASE WHEN $1 IN ('done','failed','timeout') THEN COALESCE(completed_at, now()) ELSE NULL END,
        active_run_seconds = active_run_seconds + CASE WHEN $1 IN ('done','failed','timeout') AND run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
        run_segment_started_at = CASE WHEN $1 IN ('done','failed','timeout') THEN NULL ELSE run_segment_started_at END
- WHERE id = $2`, status, id)
-	return err
+ WHERE id = $2
+ RETURNING active_run_seconds, run_segment_started_at`, status, id).Scan(&active, &started)
+	if err == sql.ErrNoRows {
+		return 0, nil, nil
+	}
+	return active, started, err
 }
 
 // SetTerminalStatusGuarded sets a terminal status only when the task is NOT already
@@ -596,18 +628,43 @@ UPDATE tasks
 // Returns won=false (no error) when another terminal status already stuck — the
 // caller then leaves it alone. Non-terminal transitions / re-run still use SetStatus.
 func (d *DB) SetTerminalStatusGuarded(id int64, status string) (won bool, err error) {
-	res, err := d.Exec(`
+	_, _, won, err = d.SetTerminalStatusGuardedRuntime(id, status)
+	return won, err
+}
+
+// SetTerminalStatusGuardedRuntime is the runtime-returning form used by the
+// Manager so it can mirror the terminal clock before any follow-up hydration.
+func (d *DB) SetTerminalStatusGuardedRuntime(id int64, status string) (active int64, started *time.Time, won bool, err error) {
+	err = d.QueryRow(`
 UPDATE tasks
    SET status = $1,
        completed_at = COALESCE(completed_at, now()),
        active_run_seconds = active_run_seconds + CASE WHEN run_segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - run_segment_started_at)))::bigint) ELSE 0 END,
        run_segment_started_at = NULL
- WHERE id = $2 AND status NOT IN ('done','failed','timeout')`, status, id)
-	if err != nil {
-		return false, err
+ WHERE id = $2 AND status NOT IN ('done','failed','timeout')
+ RETURNING active_run_seconds, run_segment_started_at`, status, id).Scan(&active, &started)
+	if err == sql.ErrNoRows {
+		// Preserve the authoritative runtime fields for the losing terminal
+		// writer. The guarded transition itself is still a no-op.
+		err = d.QueryRow(`SELECT active_run_seconds, run_segment_started_at FROM tasks WHERE id=$1`, id).Scan(&active, &started)
+		if err == sql.ErrNoRows {
+			return 0, nil, false, nil
+		}
+		return active, started, false, err
 	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
+	return active, started, err == nil, err
+}
+
+// ClearOpenTaskRunSegments drops execution segments that were live when the
+// process stopped. Their wall time is unknowable after a crash or deploy, so
+// startup deliberately begins with no live segment; the engine starts a fresh
+// segment only when it actually resumes work.
+func (d *DB) ClearOpenTaskRunSegments() (int64, error) {
+	res, err := d.Exec(`UPDATE tasks SET run_segment_started_at=NULL WHERE run_segment_started_at IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // StampFirstRun records a task's first-real-run moment and computes its absolute

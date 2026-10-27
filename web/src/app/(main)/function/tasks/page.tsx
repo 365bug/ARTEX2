@@ -191,7 +191,7 @@ function fmtDuration(sec: number): string {
 // taskDuration counts only active execution segments. A live segment ticks locally;
 // paused, queued, and terminal tasks stay fixed at their persisted active total.
 function taskDuration(task: Task, nowSec: number): number {
-  const active = Math.max(0, Math.floor(task.active_run_seconds ?? task.run_seconds ?? 0));
+  const active = Math.max(0, Math.floor(task.active_run_seconds ?? 0));
   const segmentStart = task.run_segment_started_unix ?? 0;
   if (task.status === "running" && !task.paused && !task.queued && segmentStart > 0) {
     return active + Math.max(0, Math.floor(nowSec - segmentStart));
