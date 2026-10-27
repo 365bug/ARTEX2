@@ -3327,6 +3327,8 @@ export const settings: Settings = {
   task_intelligence_enabled: false,
   credential_agent_enabled: false,
   credential_traffic_binding: false,
+  task_auto_title_enabled: false,
+  chat_auto_title_enabled: false,
   traffic_capture: true,
   agent_traffic_binding: false,
   llm_record: false,

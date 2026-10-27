@@ -969,6 +969,8 @@ export interface Settings {
   credential_agent_enabled: boolean;
   credential_traffic_binding: boolean;
   task_intelligence_enabled: boolean; // 默认关闭；关闭不注入情报工具或提示
+  task_auto_title_enabled: boolean; // Agent 创建任务时自动生成任务名称
+  chat_auto_title_enabled: boolean; // 对话首条消息后自动生成会话标题
   agent_traffic_binding: boolean; // Agent 自动绑定流量证据，默认关闭；不影响人工绑定
   llm_record: boolean; // LLM 录制开关（默认关）；关闭时不记录任何 LLM 调用
   // Web search. brave_key_set / tavily_key_set reflect whether a key is stored

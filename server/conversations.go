@@ -446,6 +446,59 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 			title = "附件消息"
 		}
 		_ = pg.RenameConversation(c.ID, title)
+		if s.m.pg.GetBool(db.SettingChatAutoTitle, false) {
+			conversationID := c.ID
+			agentKey := c.AgentKey
+			pinnedProfile := c.LLMProfileID
+			promptContent := msg
+			if len(req.Attachments) > 0 {
+				var names []string
+				for _, attachment := range req.Attachments {
+					if name := strings.TrimSpace(attachment.Name); name != "" {
+						names = append(names, name)
+					}
+				}
+				if len(names) > 0 {
+					if promptContent != "" {
+						promptContent += "\n"
+					}
+					promptContent += "附件：" + strings.Join(names, "、")
+				}
+			}
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				profileID := s.effectiveProfileForAgent(agentKey, pinnedProfile)
+				if profileID == nil {
+					if active, err := s.m.pg.ActiveProfile(); err == nil && active != nil {
+						profileID = &active.ID
+					}
+				}
+				if profileID == nil {
+					log.Printf("[auto-title] conversation %d: no effective profile", conversationID)
+					return
+				}
+				prov, _, ok := s.providerForProfile(*profileID)
+				if !ok {
+					log.Printf("[auto-title] conversation %d: provider unavailable for profile %d", conversationID, *profileID)
+					return
+				}
+				generated, err := agent.GenerateAutoTitle(ctx, prov, promptContent)
+				if err != nil {
+					log.Printf("[auto-title] conversation %d: %v", conversationID, err)
+					return
+				}
+				current, err := s.m.pg.GetConversation(conversationID)
+				if err != nil || current == nil {
+					return
+				}
+				if autoTitleMayReplace(current.Title, title) {
+					if err := s.m.pg.RenameConversation(conversationID, generated); err != nil {
+						log.Printf("[auto-title] conversation %d rename failed: %v", conversationID, err)
+					}
+				}
+			}()
+		}
 	}
 	_ = pg.TouchConversation(c.ID)
 
@@ -456,6 +509,12 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 	baseDir := filepath.Join(s.m.dir, "sessions", busyKey)
 	s.runConversation(c, composeAgentMessage(agentMessage, req.Attachments, baseDir), busyKey, msg)
 	writeJSON(w, 202, map[string]any{"status": "accepted"})
+}
+
+// autoTitleMayReplace protects a user's later rename while allowing the
+// asynchronous title completion to replace the initial placeholder/preview.
+func autoTitleMayReplace(current, initial string) bool {
+	return current == "" || current == "新对话" || current == initial
 }
 
 // runConversation runs ONE agent turn on a conversation in a background goroutine
