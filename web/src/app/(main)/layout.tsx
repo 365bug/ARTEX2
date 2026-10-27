@@ -16,7 +16,6 @@ import {
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { cn } from "@/lib/utils";
 
-import { EgressIpBanner, EgressIpBannerProvider } from "./_components/egress-ip-banner";
 import { MainContent } from "./_components/main-content";
 
 // Reads a layout-critical preference from the browser cookie (falls back to the
@@ -61,30 +60,27 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   if (!authed) return null;
 
   return (
-    <EgressIpBannerProvider>
-      <SidebarProvider
-        defaultOpen={defaultOpen}
-        style={
-          {
-            "--sidebar-width": "calc(var(--spacing) * 68)",
-          } as React.CSSProperties
-        }
+    <SidebarProvider
+      defaultOpen={defaultOpen}
+      style={
+        {
+          "--sidebar-width": "calc(var(--spacing) * 68)",
+        } as React.CSSProperties
+      }
+    >
+      <AppSidebar variant={variant} collapsible={collapsible} />
+      <SidebarInset
+        className={cn(
+          "[html[data-content-layout=centered]_&>*]:mx-auto",
+          "[html[data-content-layout=centered]_&>*]:w-full",
+          "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
+          "peer-data-[variant=inset]:border",
+          "[--dashboard-header-height:--spacing(12)]",
+          "min-w-0 overflow-x-hidden",
+        )}
       >
-        <AppSidebar variant={variant} collapsible={collapsible} />
-        <SidebarInset
-          className={cn(
-            "[html[data-content-layout=centered]_&>*]:mx-auto",
-            "[html[data-content-layout=centered]_&>*]:w-full",
-            "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
-            "peer-data-[variant=inset]:border",
-            "[--dashboard-header-height:--spacing(12)]",
-            "min-w-0 overflow-x-hidden",
-          )}
-        >
-          <EgressIpBanner />
-          <MainContent>{children}</MainContent>
-        </SidebarInset>
-      </SidebarProvider>
-    </EgressIpBannerProvider>
+        <MainContent>{children}</MainContent>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

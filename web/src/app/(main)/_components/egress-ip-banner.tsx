@@ -2,96 +2,40 @@
 
 import * as React from "react";
 
-import { Globe2Icon, Loader2Icon, XIcon } from "lucide-react";
+import { Globe2Icon, Loader2Icon, RefreshCwIcon, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { EgressCheck, EgressReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const DISMISSED_STORAGE_KEY = "artex-egress-ip-banner-dismissed";
-const REPORT_STORAGE_KEY = "artex-egress-ip-banner-report";
-
-type ProbeOptions = {
-  globalProxy: string;
-  probeUrl?: string;
-};
-
-type EgressIpBannerContextValue = {
-  probeEgress: (options: ProbeOptions) => Promise<EgressReport>;
+type EgressIpContextValue = {
+  enabled: boolean;
   isLoading: boolean;
   report: EgressReport | null;
   error: string | null;
-  dismissed: boolean;
-  dismiss: () => void;
+  setEnabled: (enabled: boolean) => Promise<void>;
+  probeEgress: () => Promise<EgressReport>;
+  dismiss: () => Promise<void>;
 };
 
-const EgressIpBannerContext = React.createContext<EgressIpBannerContextValue | null>(null);
+const EgressIpContext = React.createContext<EgressIpContextValue | null>(null);
 
-function readDismissed() {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.sessionStorage.getItem(DISMISSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function setDismissedStorage(dismissed: boolean) {
-  try {
-    if (dismissed) window.sessionStorage.setItem(DISMISSED_STORAGE_KEY, "true");
-    else window.sessionStorage.removeItem(DISMISSED_STORAGE_KEY);
-  } catch {
-    // sessionStorage can be unavailable in privacy-restricted browsers.
-  }
-}
-
-function readStoredReport(): EgressReport | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(REPORT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { checks?: unknown }).checks)) {
-      return null;
-    }
-    return parsed as EgressReport;
-  } catch {
-    return null;
-  }
-}
-
-function setStoredReport(report: EgressReport | null) {
-  try {
-    if (report) window.sessionStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(report));
-    else window.sessionStorage.removeItem(REPORT_STORAGE_KEY);
-  } catch {
-    // sessionStorage can be unavailable in privacy-restricted browsers.
-  }
-}
-
-export function EgressIpBannerProvider({ children }: { children: React.ReactNode }) {
-  const [report, setReport] = React.useState<EgressReport | null>(readStoredReport);
+export function EgressIpProvider({ children }: { children: React.ReactNode }) {
+  const [enabled, setEnabledState] = React.useState(false);
+  const [report, setReport] = React.useState<EgressReport | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [dismissed, setDismissed] = React.useState(readDismissed);
 
-  const probeEgress = React.useCallback(async ({ globalProxy, probeUrl }: ProbeOptions) => {
-    setDismissed(false);
-    setDismissedStorage(false);
+  const probeForProxy = React.useCallback(async (globalProxy: string) => {
     setError(null);
     setIsLoading(true);
     try {
-      const nextReport = await api.testEgressProxy({
-        global_proxy: globalProxy,
-        ...(probeUrl ? { probe_url: probeUrl } : {}),
-      });
+      const nextReport = await api.testEgressProxy({ global_proxy: globalProxy });
       setReport(nextReport);
-      setStoredReport(nextReport);
       return nextReport;
     } catch (cause) {
       setReport(null);
-      setStoredReport(null);
       const message = cause instanceof Error ? cause.message : "未知错误";
       setError(message);
       throw cause;
@@ -100,80 +44,117 @@ export function EgressIpBannerProvider({ children }: { children: React.ReactNode
     }
   }, []);
 
-  const dismiss = React.useCallback(() => {
-    setDismissed(true);
-    setDismissedStorage(true);
-  }, []);
+  React.useEffect(() => {
+    let cancelled = false;
+    api
+      .settings()
+      .then((settings) => {
+        if (cancelled) return;
+        const nextEnabled = !!settings.show_egress_ip;
+        const nextProxy = settings.global_proxy ?? "";
+        setEnabledState(nextEnabled);
+        if (nextEnabled) void probeForProxy(nextProxy);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [probeForProxy]);
 
-  const value = React.useMemo(
-    () => ({ probeEgress, isLoading, report, error, dismissed, dismiss }),
-    [dismiss, dismissed, error, isLoading, probeEgress, report],
+  const setEnabled = React.useCallback(
+    async (nextEnabled: boolean) => {
+      const settings = await api.setSettings({ show_egress_ip: nextEnabled });
+      const nextProxy = settings.global_proxy ?? "";
+      setEnabledState(nextEnabled);
+      if (nextEnabled) {
+        await probeForProxy(nextProxy);
+      } else {
+        setReport(null);
+        setError(null);
+      }
+    },
+    [probeForProxy],
   );
 
-  return <EgressIpBannerContext.Provider value={value}>{children}</EgressIpBannerContext.Provider>;
+  // Refresh from settings first so a proxy saved on the settings page is always
+  // the one used for the navbar probe.
+  const probeEgress = React.useCallback(async () => {
+    const settings = await api.settings();
+    const nextProxy = settings.global_proxy ?? "";
+    return probeForProxy(nextProxy);
+  }, [probeForProxy]);
+
+  const dismiss = React.useCallback(() => setEnabled(false), [setEnabled]);
+
+  const value = React.useMemo(
+    () => ({ enabled, isLoading, report, error, setEnabled, probeEgress, dismiss }),
+    [dismiss, enabled, error, isLoading, probeEgress, report, setEnabled],
+  );
+
+  return <EgressIpContext.Provider value={value}>{children}</EgressIpContext.Provider>;
 }
 
-export function useEgressIpBanner() {
-  const context = React.useContext(EgressIpBannerContext);
-  if (!context) throw new Error("useEgressIpBanner must be used within EgressIpBannerProvider");
+export function useEgressIp() {
+  const context = React.useContext(EgressIpContext);
+  if (!context) throw new Error("useEgressIp must be used within EgressIpProvider");
   return context;
 }
 
 function checkMessage(check: EgressCheck | undefined) {
   if (!check) return "未返回结果";
-  if (check.skipped) return "未配置 / 已跳过";
-  if (check.result.ok) return check.result.exit_ip || "已连通，但未返回 IP";
-  return `探测失败：${check.result.probes.find((probe) => probe.error)?.error || check.result.error || "未知错误"}`;
+  if (check.skipped) return "未配置";
+  if (check.result.ok) return check.result.exit_ip || "已连通";
+  return "探测失败";
 }
 
-function IpRow({ label, check }: { label: string; check: EgressCheck | undefined }) {
+function IpValue({ label, check }: { label: string; check: EgressCheck | undefined }) {
   const failed = !!check && !check.skipped && !check.result.ok;
   return (
-    <div className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className={cn("min-w-0 truncate font-mono", failed && "text-destructive")}>{checkMessage(check)}</span>
-    </div>
+    <span className="min-w-0 truncate" title={`${label}：${checkMessage(check)}`}>
+      <span className="text-muted-foreground">{label}</span> {"· "}
+      <span className={cn("font-mono", failed && "text-destructive")}>{checkMessage(check)}</span>
+    </span>
   );
 }
 
-export function EgressIpBanner() {
-  const { report, error, isLoading, dismissed, dismiss } = useEgressIpBanner();
-  if (dismissed) return null;
-  if (!isLoading && !report && !error) return null;
+export function EgressIpNavbar() {
+  const { enabled, report, error, isLoading, probeEgress, dismiss } = useEgressIp();
+  if (!enabled) return null;
 
   const direct = report?.checks.find((check) => check.key === "direct");
   const global = report?.checks.find((check) => check.key === "global");
-  let statusContent: React.ReactNode;
-  if (isLoading) {
-    statusContent = (
-      <div className="mt-1 flex items-center gap-2 text-muted-foreground">
-        <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
-        正在探测直连和全局代理出口 IP…
-      </div>
-    );
-  } else if (error) {
-    statusContent = <div className="mt-1 text-destructive">探测失败：{error}</div>;
-  } else {
-    statusContent = (
-      <div className="mt-1 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-        <IpRow label="直连 IP" check={direct} />
-        <IpRow label="全局代理 IP" check={global} />
-      </div>
-    );
-  }
-
   return (
-    <div className="border-b bg-primary/5 px-4 py-2.5 md:px-6" role="status" aria-live="polite">
-      <div className="flex items-start gap-3">
-        <Globe2Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-        <div className="min-w-0 flex-1 text-sm">
-          <div className="font-medium">出口 IP</div>
-          {statusContent}
+    <div className="flex min-w-0 items-center justify-center gap-2 text-xs" role="status" aria-live="polite">
+      <Globe2Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      {isLoading ? (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <Loader2Icon className="size-3 animate-spin" aria-hidden="true" /> 正在探测出口 IP…
+        </span>
+      ) : error ? (
+        <span className="truncate text-destructive" title={error}>
+          探测失败：{error}
+        </span>
+      ) : report ? (
+        <div className="flex min-w-0 items-center gap-3">
+          <IpValue label="直连 IP" check={direct} />
+          <IpValue label="全局代理 IP" check={global} />
         </div>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={dismiss} aria-label="关闭出口 IP 提示">
-          <XIcon aria-hidden="true" />
-        </Button>
-      </div>
+      ) : (
+        <span className="text-muted-foreground">出口 IP 暂无结果</span>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => void probeEgress()}
+        disabled={isLoading}
+        aria-label="刷新出口 IP"
+      >
+        <RefreshCwIcon className={cn("size-3.5", isLoading && "animate-spin")} aria-hidden="true" />
+      </Button>
+      <Button type="button" variant="ghost" size="icon-sm" onClick={() => void dismiss()} aria-label="关闭出口 IP显示">
+        <XIcon className="size-3.5" aria-hidden="true" />
+      </Button>
     </div>
   );
 }
