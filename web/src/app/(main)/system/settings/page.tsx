@@ -16,6 +16,7 @@ import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
 import type { EgressReport, LLMProfile, Settings, WorkerPool } from "@/lib/types";
 
+import { useEgressIpBanner } from "../../_components/egress-ip-banner";
 import { BasicAuthCard } from "./_components/basic-auth-card";
 import { UpdateCard } from "./_components/update-card";
 
@@ -38,6 +39,7 @@ export default function SystemSettingsPage() {
   const [savingProxy, setSavingProxy] = React.useState(false);
   const [globalProxyInput, setGlobalProxyInput] = React.useState("");
   const [savingGlobalProxy, setSavingGlobalProxy] = React.useState(false);
+  const [savedGlobalProxy, setSavedGlobalProxy] = React.useState("");
   // 出口探测：测一次真实请求，拿到"直连 / 经全局代理"两条出口 IP。
   const [egressTesting, setEgressTesting] = React.useState(false);
   const [egressReport, setEgressReport] = React.useState<EgressReport | null>(null);
@@ -60,6 +62,7 @@ export default function SystemSettingsPage() {
   const [noaCompaction, setNoaCompaction] = React.useState(false);
   // 纯前端偏好：不走 /api/settings，直接读写 localStorage。
   const sendMode = useChatSendMode();
+  const { probeEgress: probeEgressForBanner, isLoading: egressBannerLoading } = useEgressIpBanner();
 
   const apply = React.useCallback((s: Settings) => {
     setCredentialAgent(!!s.credential_agent_enabled);
@@ -72,7 +75,9 @@ export default function SystemSettingsPage() {
     setBraveKeySet(!!s.brave_key_set);
     setTavilyKeySet(!!s.tavily_key_set);
     setProxyInput(s.web_search_proxy ?? "");
-    setGlobalProxyInput(s.global_proxy ?? "");
+    const savedProxy = s.global_proxy ?? "";
+    setGlobalProxyInput(savedProxy);
+    setSavedGlobalProxy(savedProxy);
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
     setWorkerPools(s.worker_pools ?? []);
@@ -335,6 +340,25 @@ export default function SystemSettingsPage() {
       .finally(() => setEgressTesting(false));
   };
 
+  // 发布到站点顶栏时始终使用已保存的 global_proxy，避免把输入框里的草稿
+  // 当成 Agent 当前实际使用的代理。
+  const showEgressIp = async () => {
+    if (!settingsLoaded) {
+      toast.error("设置尚未加载完成，请稍后再试");
+      return;
+    }
+    try {
+      const rep = await probeEgressForBanner({
+        globalProxy: savedGlobalProxy.trim(),
+        ...(egressProbeUrl.trim() ? { probeUrl: egressProbeUrl.trim() } : {}),
+      });
+      if (rep.ok) toast.success("已在顶栏显示出口 IP");
+      else toast.error("出口探测完成，但部分结果不可用");
+    } catch (e) {
+      toast.error("出口探测失败：" + (e as Error).message);
+    }
+  };
+
   // Run a real "test" search ("test") against the CURRENT form values (backend +
   // proxy + entered key), falling back to saved values server-side. Toasts result.
   const runTest = () => {
@@ -463,9 +487,10 @@ export default function SystemSettingsPage() {
             <Label htmlFor="global-proxy" className="text-sm font-normal text-muted-foreground">
               代理地址
             </Label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 id="global-proxy"
+                className="min-w-0 flex-1"
                 autoComplete="off"
                 placeholder="socks5://user:pass@host:1080 或 http://host:port（留空=直连）"
                 value={globalProxyInput}
@@ -487,6 +512,14 @@ export default function SystemSettingsPage() {
                 disabled={!loaded || egressTesting}
               >
                 {egressTesting ? "测试中…" : "测试"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={showEgressIp}
+                disabled={!loaded || egressBannerLoading}
+              >
+                {egressBannerLoading ? "探测中…" : "显示出口 IP"}
               </Button>
             </div>
             <p className="text-muted-foreground text-xs">
