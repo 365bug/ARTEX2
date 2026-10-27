@@ -222,7 +222,7 @@ export function FindingsTab({ taskId }: { taskId: string }) {
           type="button"
           variant="outline"
           size="sm"
-          aria-label={`${sortPreference.field === "severity" ? "同等级" : "全部"}发现时间当前${sortPreference.direction === "asc" ? "正序" : "倒序"}，点击切换排序方向`}
+          aria-label={`${sortPreference.field === "severity" ? "同严重度" : "全部"}发现时间当前${sortPreference.direction === "asc" ? "正序" : "倒序"}，点击切换排序方向`}
           onClick={() =>
             setSortPreference((current) => ({
               ...current,
@@ -235,8 +235,8 @@ export function FindingsTab({ taskId }: { taskId: string }) {
           ) : (
             <ArrowDownIcon aria-hidden="true" />
           )}
-          {sortPreference.field === "severity" ? "同等级" : ""}
-          {sortPreference.direction === "asc" ? "最早在前" : "最新在前"}
+          {sortPreference.field === "severity" ? "同严重度：" : ""}
+          {sortPreference.direction === "asc" ? "最早优先" : "最新优先"}
         </Button>
         <form
           className="flex w-full items-center gap-2 sm:w-auto"
@@ -304,7 +304,7 @@ export function FindingsTab({ taskId }: { taskId: string }) {
                 漏洞（{sortPreference.field === "severity" ? "按严重度排序" : "按时间排序"}）
               </span>
               <span className="inline-flex items-center gap-1">
-                <span>{sortPreference.field === "severity" ? "同等级发现时间" : "发现时间"}</span>
+                <span>{sortPreference.field === "severity" ? "同严重度发现时间" : "发现时间"}</span>
                 {sortPreference.direction === "asc" ? (
                   <ArrowUpIcon className="size-3.5" />
                 ) : (

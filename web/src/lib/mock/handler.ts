@@ -1972,14 +1972,10 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/exploration/finding-case-review" && m === "POST")
     throw new Error("演示模式不执行 Reporter 整理，请在已配置模型的实例中使用");
   if (path === "/exploration/finding-cases" && m === "GET") {
-    const list = filterAndSortFindings(
-      mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope")),
-      "all",
-      {
-        field: q.get("sort") === "severity" ? "severity" : "time",
-        direction: q.get("time_direction") === "asc" ? "asc" : "desc",
-      },
-    );
+    const list = filterAndSortFindings(mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope")), "all", {
+      field: q.get("sort") === "severity" ? "severity" : "time",
+      direction: q.get("time_direction") === "asc" ? "asc" : "desc",
+    });
     const page = Math.max(1, Number(q.get("page")) || 1);
     const size = Math.min(100, Math.max(1, Number(q.get("limit")) || 20));
     const scoped = mockFindings.filter((f) => !q.get("task_id") || f.task_id === q.get("task_id"));
@@ -2055,11 +2051,16 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         max_severity: Math.max(...items.map((finding) => severityOrder[finding.severity])),
       };
     });
-    groups.sort((left, right) =>
-      q.get("sort") === "severity"
-        ? right.max_severity - left.max_severity || right.last_found_at.localeCompare(left.last_found_at)
-        : right.last_found_at.localeCompare(left.last_found_at),
-    );
+    groups.sort((left, right) => {
+      const severityCompared = right.max_severity - left.max_severity;
+      if (q.get("sort") === "severity" && severityCompared !== 0) return severityCompared;
+      const timeCompared = Date.parse(left.last_found_at) - Date.parse(right.last_found_at);
+      if (timeCompared !== 0) return q.get("time_direction") === "asc" ? timeCompared : -timeCompared;
+      // Match the backend's task ID DESC NULLS LAST tie-breaker.
+      if (left.task_id === null) return right.task_id === null ? 0 : 1;
+      if (right.task_id === null) return -1;
+      return right.task_id.localeCompare(left.task_id, undefined, { numeric: true });
+    });
     const rawPage = Number(q.get("page") ?? 1);
     const rawPageSize = Number(q.get("limit") ?? 10);
     const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
@@ -2273,13 +2274,10 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     }
     // 全局:带 page/limit → 分页对象;否则裸数组(dashboard)。
     if (!q.has("page") && !q.has("limit")) return mockFindings.map(withFid);
-    const sev = { critical: 4, high: 3, medium: 2, low: 1 } as const;
-    const list = mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope"));
-    list.sort((a, b) =>
-      q.get("sort") === "severity"
-        ? sev[b.severity] - sev[a.severity] || +new Date(b.ts) - +new Date(a.ts)
-        : +new Date(b.ts) - +new Date(a.ts),
-    );
+    const list = filterAndSortFindings(mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope")), "all", {
+      field: q.get("sort") === "severity" ? "severity" : "time",
+      direction: q.get("time_direction") === "asc" ? "asc" : "desc",
+    });
     const rawPage = Number(q.get("page") ?? 1);
     const rawPageSize = Number(q.get("limit") ?? 20);
     const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
