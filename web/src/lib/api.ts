@@ -640,9 +640,9 @@ export const api = {
     get<FindingCaseDetail>(
       `/exploration/finding-cases/${id}${contextTask ? `?context_task=${encodeURIComponent(contextTask)}` : ""}`,
     ),
-  findingCaseMembers: (id: string, page = 1, contextTask?: string) =>
+  findingCaseMembers: (id: string, page = 1, contextTask?: string, pageSize = 20) =>
     get<FindingsPage>(
-      `/exploration/finding-cases/${id}/members?page=${page}&limit=20${contextTask ? `&context_task=${encodeURIComponent(contextTask)}` : ""}`,
+      `/exploration/finding-cases/${id}/members?page=${page}&limit=${pageSize}${contextTask ? `&context_task=${encodeURIComponent(contextTask)}` : ""}`,
     ),
   removeFindingCaseMember: (id: string, fid: string, reason: string) =>
     http<{ ok: boolean }>(`/exploration/finding-cases/${id}/members/${fid}`, {
