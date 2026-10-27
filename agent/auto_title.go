@@ -51,22 +51,23 @@ func cleanAutoTitle(raw string) string {
 	if i := strings.IndexAny(title, "\r\n"); i >= 0 {
 		title = strings.TrimSpace(title[:i])
 	}
-	for len(title) >= 2 {
-		first, firstSize := utf8.DecodeRuneInString(title)
-		last, lastSize := utf8.DecodeLastRuneInString(title)
-		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '“' && last == '”') || (first == '「' && last == '」') {
-			title = strings.TrimSpace(title[firstSize : len(title)-lastSize])
-			continue
+	for {
+		previous := title
+		if len(title) >= 2 {
+			first, firstSize := utf8.DecodeRuneInString(title)
+			last, lastSize := utf8.DecodeLastRuneInString(title)
+			if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '“' && last == '”') || (first == '「' && last == '」') {
+				title = title[firstSize : len(title)-lastSize]
+			}
 		}
-		break
-	}
-	lines := strings.FieldsFunc(title, func(r rune) bool { return r == '\r' || r == '\n' })
-	if len(lines) > 0 {
-		title = strings.TrimSpace(lines[0])
-	}
-	for _, prefix := range []string{"标题：", "标题:"} {
-		if strings.HasPrefix(title, prefix) {
-			title = strings.TrimSpace(strings.TrimPrefix(title, prefix))
+		for _, prefix := range []string{"标题：", "标题:"} {
+			if strings.HasPrefix(title, prefix) {
+				title = strings.TrimPrefix(title, prefix)
+				break
+			}
+		}
+		title = strings.TrimSpace(title)
+		if title == previous {
 			break
 		}
 	}

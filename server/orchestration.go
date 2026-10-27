@@ -306,17 +306,35 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				llmIDs = []int64{*pin}
 			}
 			name := ""
-			if s.m.pg.GetBool(db.SettingTaskAutoTitle, false) {
-				if active, activeErr := s.m.pg.ActiveProfile(); activeErr == nil && active != nil {
-					if prov, _, providerOK := s.providerForProfile(active.ID); providerOK {
-						if generated, titleErr := agent.GenerateAutoTitle(ctx, prov, a.Description+"\n"+a.Goal); titleErr == nil {
-							name = generated
-						} else {
-							log.Printf("[auto-title] task %s: %v", a.Description, titleErr)
-						}
-					} else {
-						log.Printf("[auto-title] task provider unavailable for active profile %d", active.ID)
+			autoTitleEnabled := s.m.pg.GetBool(db.SettingTaskAutoTitle, false)
+			if autoTitleEnabled {
+				if err := ctx.Err(); err != nil {
+					return actool.Errorf(err.Error()), nil
+				}
+				active, activeErr := s.m.pg.ActiveProfile()
+				if activeErr != nil {
+					log.Printf("[auto-title] active profile lookup failed: %v", activeErr)
+				} else if active == nil {
+					log.Printf("[auto-title] no active profile")
+				} else if prov, _, providerOK := s.providerForProfile(active.ID); providerOK {
+					titleCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+					defer cancel()
+					generated, titleErr := agent.GenerateAutoTitle(titleCtx, prov, a.Description+"\n"+a.Goal)
+					if err := ctx.Err(); err != nil {
+						return actool.Errorf(err.Error()), nil
 					}
+					if titleErr == nil {
+						name = generated
+					} else {
+						log.Printf("[auto-title] task title generation failed: %v", titleErr)
+					}
+				} else {
+					log.Printf("[auto-title] task provider unavailable for active profile %d", active.ID)
+				}
+			}
+			if autoTitleEnabled {
+				if err := ctx.Err(); err != nil {
+					return actool.Errorf(err.Error()), nil
 				}
 			}
 			t, err := s.m.CreateTaskWithOptions(a.Description, a.Goal, db.TaskCreateOptions{

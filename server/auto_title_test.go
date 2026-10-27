@@ -12,3 +12,14 @@ func TestAutoTitleMayReplace(t *testing.T) {
 		t.Fatal("manual title must not be overwritten")
 	}
 }
+
+func TestAutoTitleIsUsable(t *testing.T) {
+	for _, generated := range []string{"", "新对话"} {
+		if autoTitleIsUsable(generated) {
+			t.Fatalf("placeholder title %q must be rejected", generated)
+		}
+	}
+	if !autoTitleIsUsable("整理项目设置") {
+		t.Fatal("generated title should be accepted")
+	}
+}

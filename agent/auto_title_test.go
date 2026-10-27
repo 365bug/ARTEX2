@@ -41,6 +41,15 @@ func TestGenerateAutoTitleCleansResponse(t *testing.T) {
 	if p.req.Thinking != "disabled" || p.req.MaxTokens != 96 || len(p.req.Tools) != 0 {
 		t.Fatalf("request options: %+v", p.req)
 	}
+
+	quoted := &autoTitleProvider{reply: `标题："整理项目设置"`}
+	got, err = GenerateAutoTitle(t.Context(), quoted, "整理项目设置")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "整理项目设置" {
+		t.Fatalf("nested quote/prefix cleanup: got %q", got)
+	}
 }
 
 func TestGenerateAutoTitleProviderError(t *testing.T) {
