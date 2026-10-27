@@ -3445,6 +3445,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"traffic_capture":           s.m.TrafficEnabled(),
 		"agent_traffic_binding":     s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"task_intelligence_enabled": s.m.pg.GetBool(db.SettingTaskIntelligence, false),
+		db.SettingTaskAutoTitle:     s.m.pg.GetBool(db.SettingTaskAutoTitle, false),
+		db.SettingChatAutoTitle:     s.m.pg.GetBool(db.SettingChatAutoTitle, false),
 		db.SettingCredentialAgent:   s.m.pg.GetBool(db.SettingCredentialAgent, false),
 		db.SettingCredentialTraffic: s.m.pg.GetBool(db.SettingCredentialAgent, false) && s.m.pg.GetBool(db.SettingCredentialTraffic, false),
 		"llm_record":                s.m.LLMRecordEnabled(),
@@ -3520,6 +3522,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		TrafficCapture      *bool `json:"traffic_capture"`
 		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
 		TaskIntelligence    *bool `json:"task_intelligence_enabled"`
+		TaskAutoTitle       *bool `json:"task_auto_title_enabled"`
+		ChatAutoTitle       *bool `json:"chat_auto_title_enabled"`
 		CredentialAgent     *bool `json:"credential_agent_enabled"`
 		CredentialTraffic   *bool `json:"credential_traffic_binding"`
 		LLMRecord           *bool `json:"llm_record"` // LLM 录制开关（默认关）；即时生效，无需重建 agent
@@ -3690,6 +3694,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.TaskIntelligence != nil || req.CredentialAgent != nil || req.CredentialTraffic != nil {
 		if err := s.m.pg.SetIntelligenceSettings(r.Context(), req.TaskIntelligence, req.CredentialAgent, req.CredentialTraffic); err != nil {
 			intelligenceError(w, err)
+			return
+		}
+	}
+	if req.TaskAutoTitle != nil {
+		if err := s.m.pg.SetBool(db.SettingTaskAutoTitle, *req.TaskAutoTitle); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.ChatAutoTitle != nil {
+		if err := s.m.pg.SetBool(db.SettingChatAutoTitle, *req.ChatAutoTitle); err != nil {
+			writeErr(w, 500, err.Error())
 			return
 		}
 	}

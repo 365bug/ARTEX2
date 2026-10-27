@@ -25,6 +25,8 @@ export default function SystemSettingsPage() {
   const [credentialBinding, setCredentialBinding] = React.useState(false);
   const [savingCredentials, setSavingCredentials] = React.useState(false);
   const [intelligenceEnabled, setIntelligenceEnabled] = React.useState(false);
+  const [taskAutoTitleEnabled, setTaskAutoTitleEnabled] = React.useState(false);
+  const [chatAutoTitleEnabled, setChatAutoTitleEnabled] = React.useState(false);
   const [savingIntelligence, setSavingIntelligence] = React.useState(false);
   const [trafficCapture, setTrafficCapture] = React.useState(false);
   const [agentTrafficBinding, setAgentTrafficBinding] = React.useState(false);
@@ -73,6 +75,8 @@ export default function SystemSettingsPage() {
     setCredentialAgent(!!s.credential_agent_enabled);
     setCredentialBinding(!!s.credential_traffic_binding);
     setIntelligenceEnabled(!!s.task_intelligence_enabled);
+    setTaskAutoTitleEnabled(!!s.task_auto_title_enabled);
+    setChatAutoTitleEnabled(!!s.chat_auto_title_enabled);
     setTrafficCapture(!!s.traffic_capture);
     setAgentTrafficBinding(!!s.agent_traffic_binding);
     setWebSearch(!!s.web_search_enabled);
@@ -244,6 +248,22 @@ export default function SystemSettingsPage() {
       .catch((e) => {
         setNoaCompaction(!v); // revert on failure
         toast.error(`保存失败：${(e as Error).message}`);
+      });
+  };
+
+  const toggleAutoTitle = (key: "task_auto_title_enabled" | "chat_auto_title_enabled", value: boolean) => {
+    const setter = key === "task_auto_title_enabled" ? setTaskAutoTitleEnabled : setChatAutoTitleEnabled;
+    const patch: Partial<Settings> =
+      key === "task_auto_title_enabled"
+        ? { task_auto_title_enabled: value }
+        : { chat_auto_title_enabled: value };
+    setter(value);
+    api
+      .setSettings(patch)
+      .then(apply)
+      .catch((e) => {
+        setter(!value);
+        toast.error("保存失败：" + (e as Error).message);
       });
   };
 
@@ -693,6 +713,39 @@ export default function SystemSettingsPage() {
               disabled={!loaded}
               onCheckedChange={toggleNoaCompaction}
             />
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle>自动标题</CardTitle>
+            <CardDescription>为 Agent 创建的任务和对话首条消息生成简短标题。两个开关独立生效，默认关闭。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel htmlFor="task-auto-title">任务名称</FieldLabel>
+                <FieldDescription>Agent 创建任务时自动生成任务名称；失败时保留未命名任务。</FieldDescription>
+              </FieldContent>
+              <Switch
+                id="task-auto-title"
+                checked={taskAutoTitleEnabled}
+                disabled={!loaded}
+                onCheckedChange={(value) => toggleAutoTitle("task_auto_title_enabled", value)}
+              />
+            </Field>
+            <Field orientation="horizontal" className="mt-5">
+              <FieldContent>
+                <FieldLabel htmlFor="chat-auto-title">会话标题</FieldLabel>
+                <FieldDescription>对话首条消息后自动生成会话标题；先显示消息截断文本，失败时保留截断标题。</FieldDescription>
+              </FieldContent>
+              <Switch
+                id="chat-auto-title"
+                checked={chatAutoTitleEnabled}
+                disabled={!loaded}
+                onCheckedChange={(value) => toggleAutoTitle("chat_auto_title_enabled", value)}
+              />
+            </Field>
           </CardContent>
         </Card>
 
