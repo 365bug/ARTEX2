@@ -5,6 +5,8 @@ import type { Graph as G6Graph } from "@antv/g6";
 import {
   AppWindow,
   Building2,
+  ChevronDown,
+  ChevronUp,
   Globe,
   Link2,
   type LucideIcon,
@@ -581,8 +583,10 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const [loading, setLoading] = React.useState(true);
   const [mapping, setMapping] = React.useState(false);
   const [mappingConversationId, setMappingConversationId] = React.useState<number | null>(null);
+  const [networkReportAt, setNetworkReportAt] = React.useState<Date | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = React.useState<Date | null>(null);
   const [viewMode, setViewMode] = React.useState<CoverageViewMode>("asset");
+  const [panelCollapsed, setPanelCollapsed] = React.useState(false);
   const [viewport, setViewport] = React.useState<{ zoom: number; position: [number, number] }>({
     zoom: 1,
     position: [0, 0],
@@ -634,10 +638,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       .finally(() => setLoading(false));
   }, [taskId, coverageEnabled]);
 
-  const remapAssets = React.useCallback(async () => {
+  const remapNetwork = React.useCallback(async () => {
     setMapping(true);
+    setNetworkReportAt(null);
     try {
-      const run = await api.startAssetMapping(taskId);
+      const run = await api.startTopologyMapping(taskId);
       setMappingConversationId(run.conversation_id);
     } catch {
       setMapping(false);
@@ -654,7 +659,9 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         if (!state.running) {
           setMapping(false);
           setMappingConversationId(null);
-          fetchGraph();
+          // The asset relationship graph is read directly from the asset store;
+          // completing the network report must not rebuild or replace it.
+          setNetworkReportAt(new Date());
         }
       } catch {
         // Keep the spinner while the conversation endpoint is temporarily unavailable.
@@ -666,7 +673,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [fetchGraph, mappingConversationId]);
+  }, [mappingConversationId]);
 
   React.useEffect(() => {
     fetchGraph();
@@ -675,7 +682,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   React.useEffect(() => {
     let cancelled = false;
     api
-      .assetMappingStatus(taskId)
+      .topologyMappingStatus(taskId)
       .then((status) => {
         if (cancelled) return;
         setMapping(status.running);
@@ -883,11 +890,14 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
               <div
                 key={zone}
                 className={cn("relative border-r border-slate-200/80 dark:border-slate-800/80", zoneMeta[zone].className, index === 2 && "border-r-0")}
-              >
-                <div className="absolute top-3 left-4">
-                  <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
-                  <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
-                </div>
+              />
+            ))}
+          </div>
+          <div className="absolute top-3 left-0 z-10 grid w-full grid-cols-3 px-4">
+            {(Object.keys(zoneMeta) as Zone[]).map((zone) => (
+              <div key={zone} className="min-w-0">
+                <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
+                <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
               </div>
             ))}
           </div>
@@ -901,22 +911,33 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       <div ref={containerRef} className="relative z-10 h-full w-full pt-12" />
 
       {/* 图例 + 统计 + 刷新（叠加层） */}
-      <div className="bg-card/95 pointer-events-auto absolute bottom-3 left-3 z-20 flex max-h-[calc(100%-1.5rem)] max-w-[480px] flex-col gap-2.5 overflow-auto rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+      <div className={cn(
+        "bg-card/95 pointer-events-auto absolute bottom-3 left-3 z-20 rounded-lg border shadow-sm backdrop-blur",
+        panelCollapsed
+          ? "flex items-center gap-2 px-2.5 py-2 text-xs"
+          : "flex w-[min(480px,calc(100%-1.5rem))] max-h-[calc(100%-1.5rem)] flex-col gap-2.5 overflow-auto p-3 text-xs",
+      )}>
         <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
               <Waypoints className="size-4" />
             </span>
-            <div className="min-w-0">
-              <div className="text-foreground font-medium">资产梳理 Agent</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-foreground truncate font-medium">
+                {viewMode === "network" ? "网络拓扑梳理 Agent" : "资产关系图"}
+              </div>
               <div className="text-muted-foreground truncate text-[11px]">
-                {mapping
-                  ? "正在梳理资产关系…"
+                {viewMode === "network"
+                  ? mapping
+                    ? "正在梳理网络拓扑，并生成两份结果…"
+                    : networkReportAt
+                      ? `最近梳理 ${networkReportAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+                      : "网络拓扑等待梳理"
                   : loading
-                    ? "正在更新资产关系…"
+                    ? "正在读取资产库关系…"
                     : lastSyncedAt
-                      ? `最近更新 ${lastSyncedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
-                      : "等待首次梳理"}
+                      ? `资产库实时数据 · ${lastSyncedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+                      : "等待读取资产库"}
               </div>
             </div>
           </div>
@@ -934,17 +955,28 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           ) : (
             <span className="text-muted-foreground">{loading ? "加载中…" : "暂无范围内资产（先锚定任务范围）"}</span>
           )}
-          <div className="flex shrink-0 items-center gap-1">
+          {!panelCollapsed && <div className="flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2" onClick={() => setPanelCollapsed(true)} title="收起面板">
+              <ChevronDown className="size-3.5" />
+              <span className="hidden sm:inline">收起</span>
+            </Button>
             <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void resetView()} title="重置视图">
               <RotateCcw className="size-3.5" />
               <span className="hidden sm:inline">重置视图</span>
             </Button>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void remapAssets()} disabled={mapping} title="重新梳理资产">
-              <RefreshCw className={cn("size-3.5", (loading || mapping) && "animate-spin")} />
-              <span className="hidden sm:inline">{mapping ? "正在梳理…" : "重新梳理"}</span>
-            </Button>
-          </div>
+            {viewMode === "network" && (
+              <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void remapNetwork()} disabled={mapping} title="重新梳理网络拓扑">
+                <RefreshCw className={cn("size-3.5", (loading || mapping) && "animate-spin")} />
+                <span className="hidden sm:inline">{mapping ? "正在梳理网络…" : "梳理网络拓扑"}</span>
+              </Button>
+            )}
+          </div>}
+          {panelCollapsed && <Button variant="ghost" size="sm" className="h-7 gap-1 px-2" onClick={() => setPanelCollapsed(false)} title="展开面板">
+            <ChevronUp className="size-3.5" />
+            <span className="hidden sm:inline">展开</span>
+          </Button>}
         </div>
+        {!panelCollapsed && <>
         <div className="bg-muted/60 flex items-center gap-1 rounded-md p-1">
           <Button
             variant={viewMode === "asset" ? "secondary" : "ghost"}
@@ -1010,9 +1042,10 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         )}
         <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
           {viewMode === "network"
-            ? "网络拓扑只展示资产节点和所在区域；数据库资产使用对应数据库标识。"
-            : "点击节点查看详情并高亮关系链；拖拽节点、滚轮缩放。灰色「⋯」是折叠节点，可展开更多资产。"}
+            ? "网络拓扑梳理会话会输出资产关系结果和网络拓扑结果；图中只展示有真实资产证据的节点及区域。"
+            : "资产关系图直接读取资产库，不需要额外梳理；点击节点查看详情并高亮关系链。灰色「⋯」可展开更多资产。"}
         </p>
+        </>}
       </div>
 
       {selectedAsset && activePath.length > 0 && data && (

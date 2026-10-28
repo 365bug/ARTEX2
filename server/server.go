@@ -766,6 +766,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/task-archives/delete/batch", s.deleteTaskArchivesBatch)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage", s.taskCoverage)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
+	// Asset relationships are read directly from the asset store. This action
+	// only runs the topology explanation and produces the asset/network reports.
+	mux.HandleFunc("POST /api/tasks/{id}/topology-mapping", s.taskAssetMapping)
+	mux.HandleFunc("GET /api/tasks/{id}/topology-mapping/status", s.taskAssetMappingStatus)
+	// Keep the old paths for clients from earlier builds.
 	mux.HandleFunc("POST /api/tasks/{id}/asset-mapping", s.taskAssetMapping)
 	mux.HandleFunc("GET /api/tasks/{id}/asset-mapping/status", s.taskAssetMappingStatus)
 	mux.HandleFunc("GET /api/tasks/{id}/asset-refs", s.taskAssetRefs)
