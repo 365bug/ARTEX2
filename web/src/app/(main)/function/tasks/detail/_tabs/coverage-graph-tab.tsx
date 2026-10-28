@@ -113,6 +113,26 @@ const KIND_ICON: Record<Kind, string> = {
   ),
 };
 
+type DatabaseEngine = "mysql" | "sqlserver" | "postgres" | "redis" | "database";
+
+const DATABASE_ICON: Record<DatabaseEngine, string> = {
+  mysql: svgUri('<text x="12" y="15" text-anchor="middle" font-size="8" font-weight="700">MY</text>', true),
+  sqlserver: svgUri('<text x="12" y="15" text-anchor="middle" font-size="7" font-weight="700">MS</text>', true),
+  postgres: svgUri('<text x="12" y="15" text-anchor="middle" font-size="7" font-weight="700">PG</text>', true),
+  redis: svgUri('<text x="12" y="15" text-anchor="middle" font-size="8" font-weight="700">RD</text>', true),
+  database: svgUri('<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v9c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 10c0 1.7 3.1 3 7 3s7-1.3 7-3"/>'),
+};
+
+function databaseEngine(node: CoverageGraphNode): DatabaseEngine | null {
+  const raw = `${node.service_type ?? ""} ${node.label} ${node.page_title ?? ""}`.toLowerCase();
+  if (/mysql|mariadb/.test(raw)) return "mysql";
+  if (/sql\s*server|mssql|microsoft sql/.test(raw)) return "sqlserver";
+  if (/postgres|postgresql/.test(raw)) return "postgres";
+  if (/redis/.test(raw)) return "redis";
+  if (/database|数据库|dbms|oracle|mongodb|mongo|clickhouse/.test(raw)) return "database";
+  return null;
+}
+
 const FOLD_ICON = svgUri(
   '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   true,
@@ -218,6 +238,7 @@ type G6NodeDatum = {
   lbl: string;
   size: number;
   active: boolean;
+  iconSrc: string;
   x: number;
   y: number;
   // G6 v5 reads the initial position from style.x/style.y. Keeping the
@@ -234,7 +255,16 @@ function trunc(s: string, n = 26): string {
 
 // 图里的节点文案：服务不显示完整 URL，只显示 端口·标题·状态码；端点只显示 path。
 // 其余类型沿用后端给的 label。
-function graphLabel(n: CoverageGraphNode): string {
+function graphLabel(n: CoverageGraphNode, viewMode: CoverageViewMode = "asset"): string {
+  if (viewMode === "network") {
+    if (n.kind === "endpoint") return "";
+    if (n.kind === "service") {
+      const engine = databaseEngine(n);
+      const host = n.domain || n.ip || n.label;
+      return engine ? `${engine.toUpperCase()} · ${host}${n.port ? `:${n.port}` : ""}` : `${host}${n.port ? `:${n.port}` : ""}`;
+    }
+    return n.label || n.domain || n.ip || n.app_name || kindMeta[n.kind].label;
+  }
   if (n.kind === "service") {
     const parts: string[] = [];
     if (n.port) parts.push(`:${n.port}`);
@@ -292,9 +322,10 @@ function toG6Nodes(
         fold: true,
         tested: false,
         inScope: false,
-        lbl: `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
+        lbl: viewMode === "network" && rn.kind === "endpoint" ? "" : `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
         size: 24,
         active: activeKeys.has(rn.key),
+        iconSrc: FOLD_ICON,
         style: { x: position.x, y: position.y },
         ...position,
       };
@@ -305,9 +336,12 @@ function toG6Nodes(
       fold: false,
       tested: rn.node.tested,
       inScope: rn.node.in_scope,
-      lbl: trunc(graphLabel(rn.node) || kindMeta[rn.kind].label),
+      lbl: trunc(graphLabel(rn.node, viewMode) || kindMeta[rn.kind].label),
       size: kindMeta[rn.kind].size,
       active: activeKeys.has(rn.key),
+      iconSrc: viewMode === "network" && databaseEngine(rn.node)
+        ? DATABASE_ICON[databaseEngine(rn.node) as DatabaseEngine]
+        : KIND_ICON[rn.kind],
       style: { x: position.x, y: position.y },
       ...position,
     };
@@ -666,17 +700,29 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     [data, expanded],
   );
 
+  const displayNodes = React.useMemo(
+    () => viewMode === "network"
+      ? renderNodes.filter((node) => node.kind !== "endpoint")
+      : renderNodes,
+    [renderNodes, viewMode],
+  );
+  const displayNodeKeys = React.useMemo(() => new Set(displayNodes.map((node) => node.key)), [displayNodes]);
+  const displayEdges = React.useMemo(
+    () => renderEdges.filter((edge) => displayNodeKeys.has(edge.src) && displayNodeKeys.has(edge.dst)),
+    [displayNodeKeys, renderEdges],
+  );
+
   // 结构签名：只在可见节点/边集合变化时重建图 + 重跑布局，避免无谓抖动。
   const sig = React.useMemo(
     () =>
-      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}|${activePath.join(",")}|${viewMode}`,
-    [activePath, renderNodes, renderEdges, viewMode],
+      `${displayNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${displayEdges.length}|${activePath.join(",")}|${viewMode}`,
+    [activePath, displayEdges, displayNodes, viewMode],
   );
 
   // 维护 gDataRef + renderMapRef（供事件与图数据应用读取）。
   gDataRef.current = {
-    nodes: toG6Nodes(renderNodes, new Set(activePath), viewMode),
-    edges: renderEdges.map((e) => ({
+    nodes: toG6Nodes(displayNodes, new Set(activePath), viewMode),
+    edges: displayEdges.map((e) => ({
       // The API stores child → parent containment. Topology reads naturally
       // from internet entry → boundary service → internal asset, so reverse
       // the visual arrow without changing the source graph or lineage logic.
@@ -686,7 +732,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     })),
   };
   const rmap = new Map<string, RenderNode>();
-  for (const rn of renderNodes) rmap.set(rn.key, rn);
+  for (const rn of displayNodes) rmap.set(rn.key, rn);
   renderMapRef.current = rmap;
 
   const applyData = React.useCallback(() => {
@@ -730,7 +776,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             stroke: (d: unknown) => nodeStroke(nd(d)),
             lineWidth: (d: unknown) => (nd(d).fold || !nd(d).inScope ? 1 : 1.5),
             lineDash: (d: unknown) => (nd(d).fold || !nd(d).inScope ? [3, 3] : [0]),
-            iconSrc: (d: unknown) => (nd(d).fold ? FOLD_ICON : KIND_ICON[nd(d).kind]),
+            iconSrc: (d: unknown) => nd(d).iconSrc,
             iconWidth: (d: unknown) => Math.max(12, nd(d).size * 0.55),
             iconHeight: (d: unknown) => Math.max(12, nd(d).size * 0.55),
             labelText: (d: unknown) => nd(d).lbl,
@@ -924,7 +970,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           </Button>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-          {(Object.keys(kindMeta) as Kind[]).map((k) => {
+          {(Object.keys(kindMeta) as Kind[]).filter((k) => viewMode === "asset" || k !== "endpoint").map((k) => {
             const m = kindMeta[k];
             const Icon = m.icon;
             return (
@@ -952,16 +998,20 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" /> 范围外
           </span>
         </div>
-        <div className="border-border/60 flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
-          {(Object.keys(zoneMeta) as Zone[]).map((zone) => (
-            <span key={zone} className="text-muted-foreground inline-flex items-center gap-1.5">
-              <span className={cn("size-2.5 rounded-full", zone === "internet" && "bg-sky-400", zone === "boundary" && "bg-amber-400", zone === "internal" && "bg-emerald-400")} />
-              {zoneMeta[zone].label}
-            </span>
-          ))}
-        </div>
+        {viewMode === "network" && (
+          <div className="border-border/60 flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
+            {(Object.keys(zoneMeta) as Zone[]).map((zone) => (
+              <span key={zone} className="text-muted-foreground inline-flex items-center gap-1.5">
+                <span className={cn("size-2.5 rounded-full", zone === "internet" && "bg-sky-400", zone === "boundary" && "bg-amber-400", zone === "internal" && "bg-emerald-400")} />
+                {zoneMeta[zone].label}
+              </span>
+            ))}
+          </div>
+        )}
         <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
-          点击节点查看详情并高亮关系链；拖拽节点、滚轮缩放。灰色「⋯」是折叠节点，可展开更多资产。
+          {viewMode === "network"
+            ? "网络拓扑只展示资产节点和所在区域；数据库资产使用对应数据库标识。"
+            : "点击节点查看详情并高亮关系链；拖拽节点、滚轮缩放。灰色「⋯」是折叠节点，可展开更多资产。"}
         </p>
       </div>
 
