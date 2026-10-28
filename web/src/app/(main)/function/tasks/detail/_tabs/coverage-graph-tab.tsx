@@ -34,6 +34,34 @@ const FOLD_STEP = 20;
 
 type Kind = CoverageGraphNode["kind"];
 
+type Zone = "internet" | "boundary" | "internal";
+
+const zoneMeta: Record<Zone, { label: string; description: string; className: string }> = {
+  internet: {
+    label: "互联网区",
+    description: "公网域名 / 外部入口",
+    className: "bg-sky-50/70 dark:bg-sky-950/20",
+  },
+  boundary: {
+    label: "边界区",
+    description: "服务 / 网关 / 暴露面",
+    className: "bg-amber-50/70 dark:bg-amber-950/15",
+  },
+  internal: {
+    label: "内网区",
+    description: "业务资产 / 应用 / 端点",
+    className: "bg-emerald-50/65 dark:bg-emerald-950/15",
+  },
+};
+
+// 当前后端资产关系以域名、服务和业务资产为主，先用类型推导可视化分区。
+// 后续接入 VPC/网段/防火墙数据后，可以直接由 API 返回 zone 覆盖这里的推导结果。
+function zoneOf(node: CoverageGraphNode): Zone {
+  if (node.kind === "root_domain" || node.kind === "subdomain") return "internet";
+  if (node.kind === "service") return "boundary";
+  return "internal";
+}
+
 type KindMeta = { label: string; icon: LucideIcon; iconBg: string; hex: string; size: number };
 
 const kindMeta: Record<Kind, KindMeta> = {
@@ -185,7 +213,10 @@ type G6NodeDatum = {
   inScope: boolean;
   lbl: string;
   size: number;
+  active: boolean;
 };
+
+type G6EdgeDatum = { source: string; target: string; active: boolean };
 
 function trunc(s: string, n = 26): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
@@ -211,7 +242,7 @@ function graphLabel(n: CoverageGraphNode): string {
   return n.label;
 }
 
-function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
+function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDatum[] {
   return renderNodes.map((rn) => {
     if (rn.fold) {
       return {
@@ -222,6 +253,7 @@ function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
         inScope: false,
         lbl: `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
         size: 24,
+        active: activeKeys.has(rn.key),
       };
     }
     return {
@@ -232,6 +264,7 @@ function toG6Nodes(renderNodes: RenderNode[]): G6NodeDatum[] {
       inScope: rn.node.in_scope,
       lbl: trunc(graphLabel(rn.node) || kindMeta[rn.kind].label),
       size: kindMeta[rn.kind].size,
+      active: activeKeys.has(rn.key),
     };
   });
 }
@@ -248,6 +281,7 @@ function nodeFill(d: G6NodeDatum): string {
   return "#94a3b8";
 }
 function nodeStroke(d: G6NodeDatum): string {
+  if (d.active) return "#0f766e";
   if (d.fold || !d.inScope) return "#94a3b8";
   if (d.tested) return "#0f766e";
   return "#64748b";
@@ -464,16 +498,19 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const [expanded, setExpanded] = React.useState<Map<string, number>>(new Map());
   const [selectedAsset, setSelectedAsset] = React.useState<CoverageGraphNode | null>(null);
   const [selectedFoldId, setSelectedFoldId] = React.useState<string | null>(null);
+  const [activePath, setActivePath] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [lastSyncedAt, setLastSyncedAt] = React.useState<Date | null>(null);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const graphRef = React.useRef<G6Graph | null>(null);
   // click 处理需要最新的 key→RenderNode 映射（G6 事件回调闭包外读 ref）。
   const renderMapRef = React.useRef<Map<string, RenderNode>>(new Map());
-  const gDataRef = React.useRef<{ nodes: G6NodeDatum[]; edges: { source: string; target: string }[] }>({
+  const gDataRef = React.useRef<{ nodes: G6NodeDatum[]; edges: G6EdgeDatum[] }>({
     nodes: [],
     edges: [],
   });
+  const graphDataRef = React.useRef<typeof data>(null);
 
   const fetchGraph = React.useCallback(() => {
     setLoading(true);
@@ -484,6 +521,8 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         // tested 状态——不显示测试进度、不做已测高亮。
         const nodes = coverageEnabled ? (g.nodes ?? []) : (g.nodes ?? []).map((n) => ({ ...n, tested: false }));
         setData({ nodes, edges: g.edges ?? [] });
+        graphDataRef.current = { nodes, edges: g.edges ?? [] };
+        setLastSyncedAt(new Date());
       })
       .catch(() => {
         /* 保留上一次数据 */
@@ -506,14 +545,18 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   // 结构签名：只在可见节点/边集合变化时重建图 + 重跑布局，避免无谓抖动。
   const sig = React.useMemo(
     () =>
-      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}`,
-    [renderNodes, renderEdges],
+      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}|${activePath.join(",")}`,
+    [activePath, renderNodes, renderEdges],
   );
 
   // 维护 gDataRef + renderMapRef（供事件与图数据应用读取）。
   gDataRef.current = {
-    nodes: toG6Nodes(renderNodes),
-    edges: renderEdges.map((e) => ({ source: e.src, target: e.dst })),
+    nodes: toG6Nodes(renderNodes, new Set(activePath)),
+    edges: renderEdges.map((e) => ({
+      source: e.src,
+      target: e.dst,
+      active: activePath.includes(e.src) && activePath.includes(e.dst),
+    })),
   };
   const rmap = new Map<string, RenderNode>();
   for (const rn of renderNodes) rmap.set(rn.key, rn);
@@ -542,7 +585,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         container: containerRef.current,
         autoResize: true,
         autoFit: "view",
-        background: "#f0f2f7",
+        background: "transparent",
         node: {
           style: {
             size: (d: unknown) => nd(d).size,
@@ -561,10 +604,18 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             labelBackgroundFill: "rgba(255,255,255,0.75)",
             labelBackgroundRadius: 3,
             labelPadding: [1, 3],
+            opacity: (d: unknown) =>
+              gDataRef.current.nodes.some((node) => node.active) && !nd(d).active ? 0.28 : 1,
           },
         },
         edge: {
-          style: { stroke: "#cbd5e1", lineWidth: 1, endArrow: false },
+          style: {
+            stroke: (d: unknown) => ((d as G6EdgeDatum).active ? "#0f766e" : "#cbd5e1"),
+            lineWidth: (d: unknown) => ((d as G6EdgeDatum).active ? 2.5 : 1),
+            opacity: (d: unknown) =>
+              gDataRef.current.edges.some((edge) => edge.active) && !(d as G6EdgeDatum).active ? 0.18 : 1,
+            endArrow: true,
+          },
         },
         layout: {
           type: "d3-force",
@@ -590,8 +641,22 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         if (!id) return;
         const rn = renderMapRef.current.get(id);
         if (!rn) return;
-        if (rn.fold) setSelectedFoldId(rn.key);
-        else setSelectedAsset(rn.node);
+        if (rn.fold) {
+          setSelectedFoldId(rn.key);
+          return;
+        }
+        setSelectedAsset(rn.node);
+        const parents = new Map<string, string>();
+        for (const edge of graphDataRef.current?.edges ?? []) {
+          if (!parents.has(edge.src)) parents.set(edge.src, edge.dst);
+        }
+        const lineage: string[] = [];
+        let cursor: string | undefined = rn.node.key;
+        while (cursor && !lineage.includes(cursor)) {
+          lineage.push(cursor);
+          cursor = parents.get(cursor);
+        }
+        setActivePath(lineage);
       });
       graphRef.current = graph;
       applyData();
@@ -636,14 +701,38 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const inScope = data?.nodes.filter((n) => n.in_scope).length ?? 0;
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={containerRef} className="h-full w-full" />
+    <div className="relative h-full w-full overflow-hidden bg-slate-100/80 dark:bg-slate-950/30">
+      <div className="pointer-events-none absolute inset-0 z-0 grid grid-cols-3">
+        {(Object.keys(zoneMeta) as Zone[]).map((zone, index) => (
+          <div
+            key={zone}
+            className={cn("relative border-r border-slate-200/80 dark:border-slate-800/80", zoneMeta[zone].className, index === 2 && "border-r-0")}
+          >
+            <div className="absolute top-3 left-4">
+              <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
+              <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div ref={containerRef} className="relative z-10 h-full w-full pt-12" />
 
       {/* 图例 + 统计 + 刷新（叠加层） */}
-      <div className="bg-card/95 pointer-events-auto absolute top-3 left-3 flex max-w-[340px] flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+      <div className="bg-card/95 pointer-events-auto absolute top-3 left-3 z-20 flex max-w-[360px] flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+              <Waypoints className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-foreground font-medium">资产梳理 Agent</div>
+              <div className="text-muted-foreground truncate text-[11px]">
+                {loading ? "正在更新资产关系…" : lastSyncedAt ? `最近更新 ${lastSyncedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "等待首次梳理"}
+              </div>
+            </div>
+          </div>
           {total > 0 ? (
-            <span className="text-muted-foreground">
+            <span className="text-muted-foreground whitespace-nowrap">
               范围内 <span className="text-foreground font-semibold tabular-nums">{inScope}</span>
               {coverageEnabled && (
                 <>
@@ -656,8 +745,9 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           ) : (
             <span className="text-muted-foreground">{loading ? "加载中…" : "暂无范围内资产（先锚定任务范围）"}</span>
           )}
-          <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title="刷新">
+          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={fetchGraph} title="重新梳理资产">
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+            <span className="hidden sm:inline">重新梳理</span>
           </Button>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
@@ -689,10 +779,48 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" /> 范围外
           </span>
         </div>
+        <div className="border-border/60 flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
+          {(Object.keys(zoneMeta) as Zone[]).map((zone) => (
+            <span key={zone} className="text-muted-foreground inline-flex items-center gap-1.5">
+              <span className={cn("size-2.5 rounded-full", zone === "internet" && "bg-sky-400", zone === "boundary" && "bg-amber-400", zone === "internal" && "bg-emerald-400")} />
+              {zoneMeta[zone].label}
+            </span>
+          ))}
+        </div>
         <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
-          力导向布局，可拖拽节点、滚轮缩放；灰色「⋯」是折叠节点，点开可展开更多。
+          点击节点查看详情并高亮关系链；拖拽节点、滚轮缩放。灰色「⋯」是折叠节点，可展开更多资产。
         </p>
       </div>
+
+      {selectedAsset && activePath.length > 0 && data && (
+        <div className="bg-card/95 pointer-events-auto absolute top-3 right-3 z-20 w-[min(310px,calc(100%-2rem))] rounded-lg border p-3 shadow-sm backdrop-blur">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-foreground text-sm font-semibold">关系路径</div>
+              <div className="text-muted-foreground mt-0.5 text-[11px]">从当前资产向上追溯关联关系</div>
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setActivePath([])}>
+              清除高亮
+            </Button>
+          </div>
+          <div className="mt-3 flex flex-col gap-1.5">
+            {[...activePath].reverse().map((key, index, path) => {
+              const node = data.nodes.find((item) => item.key === key);
+              if (!node) return null;
+              return (
+                <React.Fragment key={key}>
+                  <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/60 px-2 py-1.5 text-xs">
+                    <span className={cn("size-2 shrink-0 rounded-full", zoneOf(node) === "internet" && "bg-sky-500", zoneOf(node) === "boundary" && "bg-amber-500", zoneOf(node) === "internal" && "bg-emerald-500")} />
+                    <span className="text-muted-foreground shrink-0">{zoneMeta[zoneOf(node)].label}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono" title={node.label}>{node.label}</span>
+                  </div>
+                  {index < path.length - 1 && <div className="text-muted-foreground pl-3 text-[10px]">↓</div>}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <AssetSheet node={selectedAsset} taskId={taskId} onOpenChange={(o) => !o && setSelectedAsset(null)} />
       <FoldSheet
