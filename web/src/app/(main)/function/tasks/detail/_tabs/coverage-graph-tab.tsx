@@ -706,12 +706,6 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             endArrow: true,
           },
         },
-        layout: {
-          // Positions are assigned by zone in toG6Nodes. Preset layout keeps
-          // internet, boundary and internal assets in their corresponding
-          // columns instead of letting a graph ranker collapse everything.
-          type: "preset",
-        },
         behaviors: ["drag-element", "drag-canvas", "zoom-canvas"],
       });
       graph.on("node:click", (evt: unknown) => {
