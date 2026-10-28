@@ -667,7 +667,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             labelBackgroundRadius: 3,
             labelPadding: [1, 3],
             opacity: (d: unknown) =>
-              gDataRef.current.nodes.some((node) => node.active) && !nd(d).active ? 0.28 : 1,
+              gDataRef.current.nodes.some((node) => node.active) && !nd(d).active ? 0.5 : 1,
           },
         },
         edge: {
@@ -708,6 +708,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           cursor = parents.get(cursor);
         }
         setActivePath(lineage);
+        void graph?.focusElement(lineage);
       });
       graphRef.current = graph;
       applyData();
@@ -856,7 +857,15 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
               <div className="text-foreground text-sm font-semibold">关系路径</div>
               <div className="text-muted-foreground mt-0.5 text-[11px]">从当前资产向上追溯关联关系</div>
             </div>
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setActivePath([])}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                setActivePath([]);
+                void graphRef.current?.fitView();
+              }}
+            >
               清除高亮
             </Button>
           </div>
