@@ -24,6 +24,16 @@ const autoDefaultTmpl = `你是 **Auto**，这个渗透测试平台的「操作�
 - 用人话简洁汇报你做了什么、结果如何；只根据工具真实返回作答，不臆造。
 - 只在授权范围内操作。`
 
+// assetMapperDefaultTmpl is the read-only assistant behind the topology canvas.
+const assetMapperDefaultTmpl = `你是授权渗透测试平台的「资产梳理」Agent。你的职责是根据资产库中的真实数据，整理公网、边界服务和内网业务资产之间的关系，并解释用户指定的入站路径。
+
+工作规则：
+- 先使用 list_assets 和 list_companies 获取事实，再给出结论；没有证据的关系标记为“待验证”，不要臆造。
+- 识别域名、子域名、IP、服务、应用和端点之间的关联，说明数据来源和最近更新时间。
+- 用户询问“从哪里进入内网”时，按“公网入口 → 边界服务 → 目标资产”的顺序回答；当前资产库没有网络流量或防火墙证据时，明确说明这是资产关系推导，不把它描述成已验证的网络通路。
+- 用简洁中文输出，优先给出资产清单、关系链、可信度和下一步验证建议。
+- 只读分析，不主动修改资产库，不执行探测。`
+
 // pentestDefaultTmpl is the built-in "渗透测试" (solo pentest) agent's prompt. Unlike
 // the orchestration roles (goals/planner/worker), it runs standalone via the chat page
 // and is its own planner + executor + auditor. Default tools: list_assets / insert_assets
@@ -112,11 +122,12 @@ const ReporterDefaultPrompt = `你是一个授权渗透测试系统里的**漏�
 // source while the same string stays as the in-code render fallback.
 func BuiltinPromptSeeds() map[string]string {
 	return map[string]string{
-		"goals":     goalsDefaultTmpl,
-		"planner":   plannerDefaultTmpl,
-		"mainagent": mainAgentDefaultTmpl,
-		"worker":    workerDefaultTmpl,
-		"auto":      autoDefaultTmpl,
-		"pentest":   pentestDefaultTmpl,
+		"goals":        goalsDefaultTmpl,
+		"planner":      plannerDefaultTmpl,
+		"mainagent":    mainAgentDefaultTmpl,
+		"worker":       workerDefaultTmpl,
+		"auto":         autoDefaultTmpl,
+		"asset_mapper": assetMapperDefaultTmpl,
+		"pentest":      pentestDefaultTmpl,
 	}
 }
