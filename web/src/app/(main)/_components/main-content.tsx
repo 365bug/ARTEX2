@@ -10,12 +10,13 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+import { EgressIpNavbar, EgressIpProvider } from "./egress-ip-banner";
+import { LiveClock } from "./live-clock";
 import { AccountSwitcher } from "./sidebar/account-switcher";
 import { LayoutControls } from "./sidebar/layout-controls";
 import { SearchDialog } from "./sidebar/search-dialog";
 import { ThemeSwitcher } from "./sidebar/theme-switcher";
 import { UpdateBadge } from "./update-badge";
-import { EgressIpNavbar, EgressIpProvider } from "./egress-ip-banner";
 
 // 任务详情页保持原样：它自带头部/Tabs 与内边距，这里不再叠加全局头部和 padding。
 function isFullBleed(pathname: string) {
@@ -77,6 +78,7 @@ function MainContentInner({ children }: { children: ReactNode }) {
             <EgressIpNavbar />
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <LiveClock />
             {version && (
               <span className="font-medium text-muted-foreground text-xs tabular-nums">版本 · {version}</span>
             )}
