@@ -662,7 +662,10 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       .then(() => {
         if (graph.destroyed) return;
         const active = gDataRef.current.nodes.filter((node) => node.active).map((node) => node.id);
-        return active.length > 0 ? graph.focusElement(active) : graph.fitView();
+        // Keep the zone columns at their assigned coordinates. fitView rescales
+        // to the bounds of the current nodes, so an empty zone causes the
+        // remaining nodes to slide into the next column.
+        return active.length > 0 ? graph.focusElement(active) : graph.fitCenter();
       })
       .catch((err) => {
         if (!graph.destroyed) console.error("[coverage-graph] render:", err);
@@ -679,7 +682,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       graph = new Graph({
         container: containerRef.current,
         autoResize: true,
-        autoFit: "view",
+        autoFit: "center",
         background: "transparent",
         node: {
           style: {
@@ -890,7 +893,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
               className="h-7 px-2 text-xs"
               onClick={() => {
                 setActivePath([]);
-                void graphRef.current?.fitView();
+                void graphRef.current?.fitCenter();
               }}
             >
               清除高亮
