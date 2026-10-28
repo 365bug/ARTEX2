@@ -264,6 +264,7 @@ type Manager struct {
 // Settings keys the UI toggles at runtime.
 const (
 	settingTrafficCapture      = "traffic_capture"
+	settingBrowserScreenshot   = "browser_screenshot_enabled"
 	settingAgentTrafficBinding = "agent_traffic_binding"
 	settingWebSearchOn         = "web_search_enabled"
 	settingWebSearchBackend    = "web_search_backend"
@@ -273,11 +274,11 @@ const (
 	// settingGlobalProxy is the global egress proxy for all target traffic
 	// (http/https/socks5). Empty = direct. Distinct from web_search_proxy (which
 	// only routes the search backend) and the per-profile LLM proxy.
-	settingGlobalProxy = "global_proxy"
+	settingGlobalProxy  = "global_proxy"
 	settingShowEgressIP = "show_egress_ip"
-	settingWorkers     = "workers"
-	settingWorkerPools = "worker_pools"
-	settingLLMRecord   = "llm_record"
+	settingWorkers      = "workers"
+	settingWorkerPools  = "worker_pools"
+	settingLLMRecord    = "llm_record"
 	// LLM 轮询(故障转移)。默认关闭——开启后走「全局激活配置」的 agent 在当前配置
 	// 不可用(余额不足/key 失效/限流/服务异常)时自动切到下一个配置。
 	// settingLLMPoolBindFallback 仅在轮询开启时有意义:默认关闭,即 agent/任务显式

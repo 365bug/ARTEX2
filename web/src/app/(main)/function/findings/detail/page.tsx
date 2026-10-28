@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
 import { FindingRetestPanel } from "@/components/finding-retest-panel";
+import { FindingReproductionPanel } from "@/components/finding-reproduction-panel";
 import { FindingTrafficPanel } from "@/components/finding-traffic-panel";
 import { Markdown } from "@/components/markdown";
 import { StatusBadge } from "@/components/status-badge";
@@ -42,6 +43,12 @@ const FINDING_STATUSES: FindingStatus[] = [
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString("zh-CN");
+}
+
+function usesStructuredReproduction(report: string) {
+  return (
+    /^##\s+(?:复现步骤|测试过程|复现过程)\s*$/im.test(report) && /^\s*(?:###\s*)?步骤\s*\d+[.、:：)）]/im.test(report)
+  );
 }
 
 // FieldRow is one label/value line in the right-hand status panel.
@@ -128,6 +135,7 @@ function FindingDetailInner() {
   }
 
   const title = finding.name || finding.vulnclass || "未分类";
+  const structuredReproduction = usesStructuredReproduction(finding.report || "");
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
@@ -182,47 +190,65 @@ function FindingDetailInner() {
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || "（无摘要）"}</p>
                 </CardContent>
               </Card>
-              <FindingRetestPanel key={`retest:${id}`} findingId={id} readOnly={finding.inherited} onCompleted={load} />
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">证据 / PoC</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {finding.evidence ? (
-                    <pre className="max-h-[46vh] overflow-auto rounded-md bg-muted px-3 py-2 font-mono text-xs whitespace-pre-wrap">
-                      {finding.evidence}
-                    </pre>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">（无证据）</p>
-                  )}
-                </CardContent>
-              </Card>
-              <FindingTrafficPanel
-                key={`traffic:${id}`}
-                findingId={id}
-                contextTask={contextTaskId || undefined}
-                readOnly={finding.inherited}
-                onChanged={load}
-              />
-              {/* 证据下方：详细报告(Markdown 渲染) */}
-              <Card>
-                <CardHeader className="flex-row items-center justify-between">
-                  <CardTitle className="text-sm">详细报告</CardTitle>
-                  {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}
-                </CardHeader>
-                <CardContent>
-                  {finding.report_stale ? (
-                    <Alert>
-                      <AlertDescription>流量证据已变更，详细报告待更新。</AlertDescription>
-                    </Alert>
-                  ) : null}
-                  {finding.report ? (
-                    <Markdown text={finding.report} />
-                  ) : (
-                    <p className="text-sm text-muted-foreground">暂无详细报告。</p>
-                  )}
-                </CardContent>
-              </Card>
+              {structuredReproduction ? (
+                <>
+                  <FindingReproductionPanel finding={finding} contextTask={contextTaskId || undefined} />
+                  <FindingRetestPanel
+                    key={`retest:${id}`}
+                    findingId={id}
+                    readOnly={finding.inherited}
+                    onCompleted={load}
+                  />
+                </>
+              ) : (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">证据 / PoC</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {finding.evidence ? (
+                        <pre className="max-h-[46vh] overflow-auto rounded-md bg-muted px-3 py-2 font-mono text-xs whitespace-pre-wrap">
+                          {finding.evidence}
+                        </pre>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">（无证据）</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                  <FindingTrafficPanel
+                    key={`traffic:${id}`}
+                    findingId={id}
+                    contextTask={contextTaskId || undefined}
+                    readOnly={finding.inherited}
+                    onChanged={load}
+                  />
+                  <FindingRetestPanel
+                    key={`retest:${id}`}
+                    findingId={id}
+                    readOnly={finding.inherited}
+                    onCompleted={load}
+                  />
+                  <Card>
+                    <CardHeader className="flex-row items-center justify-between">
+                      <CardTitle className="text-sm">详细报告</CardTitle>
+                      {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}
+                    </CardHeader>
+                    <CardContent>
+                      {finding.report_stale ? (
+                        <Alert>
+                          <AlertDescription>流量证据已变更，详细报告待更新。</AlertDescription>
+                        </Alert>
+                      ) : null}
+                      {finding.report ? (
+                        <Markdown text={finding.report} />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">暂无详细报告。</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </div>
 
             {/* 右栏：状态区 */}
