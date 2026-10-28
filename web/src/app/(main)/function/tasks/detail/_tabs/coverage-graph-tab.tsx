@@ -57,7 +57,9 @@ const zoneMeta: Record<Zone, { label: string; description: string; className: st
 // 当前后端资产关系以域名、服务和业务资产为主，先用类型推导可视化分区。
 // 后续接入 VPC/网段/防火墙数据后，可以直接由 API 返回 zone 覆盖这里的推导结果。
 function zoneOf(node: CoverageGraphNode): Zone {
-  if (node.kind === "root_domain" || node.kind === "subdomain") return "internet";
+  if (node.kind === "company" || node.kind === "root_domain" || node.kind === "subdomain" || node.kind === "ip") {
+    return "internet";
+  }
   if (node.kind === "service") return "boundary";
   return "internal";
 }
@@ -500,6 +502,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const [selectedFoldId, setSelectedFoldId] = React.useState<string | null>(null);
   const [activePath, setActivePath] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [mapping, setMapping] = React.useState(false);
   const [lastSyncedAt, setLastSyncedAt] = React.useState<Date | null>(null);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -529,6 +532,16 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       })
       .finally(() => setLoading(false));
   }, [taskId, coverageEnabled]);
+
+  const remapAssets = React.useCallback(async () => {
+    setMapping(true);
+    try {
+      await api.startAssetMapping(taskId);
+    } finally {
+      setMapping(false);
+      fetchGraph();
+    }
+  }, [fetchGraph, taskId]);
 
   React.useEffect(() => {
     fetchGraph();
@@ -619,6 +632,16 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         },
         layout: {
           type: "d3-force",
+          x: {
+            strength: 0.28,
+            x: (d: unknown) => {
+              const node = renderMapRef.current.get(nd(d).id);
+              const width = containerRef.current?.clientWidth ?? 900;
+              const zone = node && !node.fold ? zoneOf(node.node) : "boundary";
+              return width * (zone === "internet" ? 0.17 : zone === "boundary" ? 0.5 : 0.83);
+            },
+          },
+          y: { strength: 0.04, y: () => (containerRef.current?.clientHeight ?? 600) * 0.52 },
           collide: { radius: (d: unknown) => (nd(d).size ? nd(d).size : 20) + 8 },
           link: {
             distance: (edge: unknown) => {
@@ -718,7 +741,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       <div ref={containerRef} className="relative z-10 h-full w-full pt-12" />
 
       {/* 图例 + 统计 + 刷新（叠加层） */}
-      <div className="bg-card/95 pointer-events-auto absolute top-3 left-3 z-20 flex max-w-[360px] flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+      <div className="bg-card/95 pointer-events-auto absolute bottom-3 left-3 z-20 flex max-h-[calc(100%-1.5rem)] max-w-[360px] flex-col gap-2.5 overflow-auto rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
@@ -745,8 +768,8 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           ) : (
             <span className="text-muted-foreground">{loading ? "加载中…" : "暂无范围内资产（先锚定任务范围）"}</span>
           )}
-          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={fetchGraph} title="重新梳理资产">
-            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void remapAssets()} disabled={mapping} title="重新梳理资产">
+            <RefreshCw className={cn("size-3.5", (loading || mapping) && "animate-spin")} />
             <span className="hidden sm:inline">重新梳理</span>
           </Button>
         </div>
