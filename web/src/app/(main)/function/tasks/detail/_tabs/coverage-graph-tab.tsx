@@ -218,6 +218,10 @@ type G6NodeDatum = {
   active: boolean;
   x: number;
   y: number;
+  // G6 v5 reads the initial position from style.x/style.y. Keeping the
+  // coordinates on the datum alone makes every node start at (0, 0), after
+  // which fitView magnifies one node and hides the rest.
+  style: { x: number; y: number };
 };
 
 type G6EdgeDatum = { source: string; target: string; active: boolean };
@@ -276,6 +280,7 @@ function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDa
         lbl: `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
         size: 24,
         active: activeKeys.has(rn.key),
+        style: { x: position.x, y: position.y },
         ...position,
       };
     }
@@ -288,6 +293,7 @@ function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDa
       lbl: trunc(graphLabel(rn.node) || kindMeta[rn.kind].label),
       size: kindMeta[rn.kind].size,
       active: activeKeys.has(rn.key),
+      style: { x: position.x, y: position.y },
       ...position,
     };
   });
