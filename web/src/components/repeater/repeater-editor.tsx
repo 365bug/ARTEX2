@@ -154,6 +154,7 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
           onChange={changeRequest}
           disabled={busy}
           placeholder="POST /path HTTP/1.1"
+          syntaxHighlight
         />
         <div className="flex min-h-[300px] min-w-0 flex-col gap-2 xl:min-h-0">
           {response?.error ? (
@@ -166,6 +167,7 @@ export function RepeaterEditor({ tab }: { tab: RepeaterTab }) {
             label="响应"
             value={response ? buildRawResponse(response) : ""}
             placeholder="发送后显示原始响应"
+            syntaxHighlight
           />
         </div>
       </div>

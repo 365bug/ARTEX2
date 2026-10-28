@@ -13,7 +13,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type { FindingTrafficDetail, TrafficDetail } from "@/lib/types";
 
@@ -114,17 +113,16 @@ export function TrafficEvidenceViewer({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : detail ? (
-          <Tabs defaultValue="request">
-            <TabsList>
-              <TabsTrigger value="request">请求 Request</TabsTrigger>
-              <TabsTrigger value="response">响应 Response</TabsTrigger>
-            </TabsList>
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
             {(["request", "response"] as const).map((side) => (
-              <TabsContent key={side} value={side}>
+              <div key={side} className="flex min-w-0 flex-col gap-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted-foreground text-xs">
-                    正文 {detail[side].total.toLocaleString()} 字节{detail[side].truncated ? " · 当前为预览" : ""}
-                  </span>
+                  <div>
+                    <p className="text-sm font-medium">{side === "request" ? "请求 Request" : "响应 Response"}</p>
+                    <span className="text-muted-foreground text-xs">
+                      正文 {detail[side].total.toLocaleString()} 字节{detail[side].truncated ? " · 当前为预览" : ""}
+                    </span>
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
@@ -134,7 +132,7 @@ export function TrafficEvidenceViewer({
                         .catch((e: Error) => toast.error(e.message))
                     }
                   >
-                    下载完整{side === "request" ? "请求" : "响应"}正文
+                    下载完整正文
                   </Button>
                 </div>
                 <HttpCodeBlock
@@ -145,9 +143,9 @@ export function TrafficEvidenceViewer({
                     加载更多正文
                   </Button>
                 ) : null}
-              </TabsContent>
+              </div>
             ))}
-          </Tabs>
+          </div>
         ) : (
           <Skeleton className="h-56 w-full" />
         )}
@@ -193,18 +191,16 @@ export function CapturedTrafficViewer({ id, onClose }: { id: string | null; onCl
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : detail ? (
-          <Tabs defaultValue="request">
-            <TabsList>
-              <TabsTrigger value="request">请求 Request</TabsTrigger>
-              <TabsTrigger value="response">响应 Response</TabsTrigger>
-            </TabsList>
-            <TabsContent value="request">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="min-w-0">
+              <p className="mb-1 px-1 text-sm font-medium">请求 Request</p>
               <HttpCodeBlock raw={detail.req} />
-            </TabsContent>
-            <TabsContent value="response">
+            </div>
+            <div className="min-w-0">
+              <p className="mb-1 px-1 text-sm font-medium">响应 Response</p>
               <HttpCodeBlock raw={detail.resp} />
-            </TabsContent>
-          </Tabs>
+            </div>
+          </div>
         ) : (
           <Skeleton className="h-56 w-full" />
         )}
