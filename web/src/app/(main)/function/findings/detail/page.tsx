@@ -144,6 +144,7 @@ function FindingDetailInner() {
     <SideQuestionWorkspace
       side={side}
       label={`漏洞 #${finding.id} · ${title}`}
+      mode="floating"
       suggestions={["请解释这个漏洞的影响范围和利用条件。", "请根据当前证据检查这个漏洞是否足以确认。", "请给出可执行的修复建议。"]}
       placeholder="询问当前漏洞…"
     >

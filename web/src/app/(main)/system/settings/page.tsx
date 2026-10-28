@@ -38,6 +38,7 @@ export default function SystemSettingsPage() {
   const [savingIntelligence, setSavingIntelligence] = React.useState(false);
   const [trafficCapture, setTrafficCapture] = React.useState(false);
   const [browserScreenshot, setBrowserScreenshot] = React.useState(false);
+  const [browserScreenshotTimestamp, setBrowserScreenshotTimestamp] = React.useState(false);
   const [agentTrafficBinding, setAgentTrafficBinding] = React.useState(false);
   const [webSearch, setWebSearch] = React.useState(false);
   const [backend, setBackend] = React.useState("ddgs");
@@ -96,6 +97,7 @@ export default function SystemSettingsPage() {
     setChatAutoTitleEnabled(!!s.chat_auto_title_enabled);
     setTrafficCapture(!!s.traffic_capture);
     setBrowserScreenshot(!!s.browser_screenshot_enabled);
+    setBrowserScreenshotTimestamp(!!s.browser_screenshot_timestamp_enabled);
     setAgentTrafficBinding(!!s.agent_traffic_binding);
     setWebSearch(!!s.web_search_enabled);
     setBackend(s.web_search_backend || "ddgs");
@@ -234,6 +236,22 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => {
         setBrowserScreenshot(!v);
+        toast.error(`保存失败：${(e as Error).message}`);
+      })
+      .finally(() => setSaving(false));
+  };
+
+  const toggleBrowserScreenshotTimestamp = (v: boolean) => {
+    setBrowserScreenshotTimestamp(v);
+    setSaving(true);
+    api
+      .setSettings({ browser_screenshot_timestamp_enabled: v })
+      .then((s) => {
+        apply(s);
+        toast.success(v ? "已开启截图时间标记" : "已关闭截图时间标记");
+      })
+      .catch((e) => {
+        setBrowserScreenshotTimestamp(!v);
         toast.error(`保存失败：${(e as Error).message}`);
       })
       .finally(() => setSaving(false));
@@ -489,6 +507,29 @@ export default function SystemSettingsPage() {
               checked={trafficCapture}
               disabled={!loaded || saving}
               onCheckedChange={toggleTraffic}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CameraIcon className="size-4" />
+              截图时间标记
+            </CardTitle>
+            <CardDescription>
+              开启后，报告中的浏览器截图会在右上角显示截图保存时间，格式为“年月日 时:分:秒”（例如 2026-10-29 01:14:11）。该标记只影响截图展示，不改变原始截图文件。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-4">
+            <Label htmlFor="browser-screenshot-timestamp" className="text-sm font-normal text-muted-foreground">
+              {browserScreenshotTimestamp ? "已开启 · 显示截图时间" : "已关闭 · 使用原始截图"}
+            </Label>
+            <Switch
+              id="browser-screenshot-timestamp"
+              checked={browserScreenshotTimestamp}
+              disabled={!loaded || saving}
+              onCheckedChange={toggleBrowserScreenshotTimestamp}
             />
           </CardContent>
         </Card>

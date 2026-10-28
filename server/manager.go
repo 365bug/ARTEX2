@@ -265,6 +265,7 @@ type Manager struct {
 const (
 	settingTrafficCapture      = "traffic_capture"
 	settingBrowserScreenshot   = "browser_screenshot_enabled"
+	settingScreenshotTimestamp = "browser_screenshot_timestamp_enabled"
 	settingAgentTrafficBinding = "agent_traffic_binding"
 	settingWebSearchOn         = "web_search_enabled"
 	settingWebSearchBackend    = "web_search_backend"
@@ -835,8 +836,13 @@ func (m *Manager) syncBrowserMCPProxy() {
 	proxy := m.ProxyAddr()  // "" when capture off
 	cert := m.ProxyCACert() // "" when capture off
 
-	args := stripProxyArgs(decodeStrSlice(srv.Args))
+	args := ensureBrowserMCPArgs(stripProxyArgs(decodeStrSlice(srv.Args)), m.pg.GetBool(settingBrowserScreenshot, false))
 	env := decodeStrMap(srv.Env)
+	if m.pg.GetBool(settingBrowserScreenshot, false) {
+		// A persisted screenshot opt-in must survive restart even if an older
+		// database had the seeded MCP disabled.
+		srv.Enabled = true
+	}
 	delete(env, "NODE_EXTRA_CA_CERTS")
 	if proxy != "" {
 		args = append(args, "--proxy-server", proxy)
@@ -855,6 +861,33 @@ func (m *Manager) syncBrowserMCPProxy() {
 	} else {
 		log.Printf("[mcp] browser MCP 已移除捕获代理配置")
 	}
+}
+
+// ensureBrowserMCPArgs keeps the built-in Playwright MCP runnable in the
+// application container. The production image intentionally runs the service
+// as root; Chromium refuses to start in that mode unless --no-sandbox is
+// passed. Keep this migration idempotent so an existing database is repaired
+// as soon as the browser MCP is reconciled (including after a restart).
+func ensureBrowserMCPArgs(args []string, ignoreHTTPSErrors bool) []string {
+	out := append([]string(nil), args...)
+	has := func(want string) bool {
+		for _, arg := range out {
+			if arg == want || strings.HasPrefix(arg, want+"=") {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("--headless") {
+		out = append(out, "--headless")
+	}
+	if !has("--no-sandbox") {
+		out = append(out, "--no-sandbox")
+	}
+	if ignoreHTTPSErrors && !has("--ignore-https-errors") {
+		out = append(out, "--ignore-https-errors")
+	}
+	return out
 }
 
 // stripProxyArgs removes any --proxy-server/--proxy-bypass flags (both "--flag val"

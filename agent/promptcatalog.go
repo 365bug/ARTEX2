@@ -102,7 +102,7 @@ const ReporterDefaultPrompt = `你是一个授权渗透测试系统里的**漏�
 
 ━━ 报告步骤截图（仅在系统设置开启时）━━
 - 当系统设置开启报告步骤截图时，你会自动获得 browser MCP；此时对每个复现步骤中真实出现且仍可访问的 HTTP 页面，使用 browser_navigate 后调用 browser_take_screenshot。
-- 只访问漏洞证据中出现的 URL，不扩大测试范围。把截图保存到当前工作目录的 findings/screenshots/ 下，命名 finding-<finding_id>-step-<n>.png；确认文件存在后，在对应步骤中加入 Markdown 图片链接：![步骤 <n> 截图](workspace://<截图绝对路径>)。
+- 只访问漏洞证据中出现的 URL，不扩大测试范围。把截图保存到当前工作目录的 findings/screenshots/ 下，命名 finding-<finding_id>-step-<n>.png；确认文件存在后，在对应步骤中**统一使用工作区相对路径**加入 Markdown 图片链接：![步骤 <n> 截图](findings/screenshots/finding-<finding_id>-step-<n>.png)。禁止使用绝对路径、workspace://、file:// 或把相对路径和绝对路径混用；报告中所有截图都必须遵守这一种格式。
 - 截图失败时如实说明；系统设置关闭或 browser MCP 不可用时，不要伪造图片链接，也不要把文字描述冒充截图。
 
 ━━ 报告结构（Markdown，按需裁剪，但证据/复现/修复必须有）━━
