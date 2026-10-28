@@ -43,7 +43,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SortableHead } from "@/components/ui/sortable-head";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { useStoredSortPreference } from "@/lib/sort-preference";
@@ -774,7 +773,7 @@ export default function TrafficPage() {
         />
       ) : null}
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[48rem]! sm:max-w-[48rem]!">
+        <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[72rem]! sm:max-w-[72rem]!">
           {selected && (
             <>
               <SheetHeader className="border-b px-5 py-4">
@@ -797,32 +796,24 @@ export default function TrafficPage() {
                   {importing ? "转入中…" : "送入请求重发"}
                 </Button>
               </SheetHeader>
-              <Tabs defaultValue="request" className="min-h-0 flex-1 gap-0">
-                <TabsList className="mx-5 mt-4 grid w-auto grid-cols-2">
-                  <TabsTrigger value="request">请求 Request</TabsTrigger>
-                  <TabsTrigger value="response">响应 Response</TabsTrigger>
-                </TabsList>
-                <TabsContent value="request" className="min-h-0 overflow-auto">
-                  {detailLoading ? (
-                    <div className="flex items-center gap-2 p-5 text-xs text-muted-foreground">
-                      <Loader2Icon className="size-3.5 animate-spin" />
-                      加载报文…
-                    </div>
-                  ) : (
-                    <HttpCodeBlock raw={requestWithHost(detail?.req ?? "", selected)} />
-                  )}
-                </TabsContent>
-                <TabsContent value="response" className="min-h-0 overflow-auto">
-                  {detailLoading ? (
-                    <div className="flex items-center gap-2 p-5 text-xs text-muted-foreground">
-                      <Loader2Icon className="size-3.5 animate-spin" />
-                      加载报文…
-                    </div>
-                  ) : (
-                    <HttpCodeBlock raw={detail?.resp ?? ""} />
-                  )}
-                </TabsContent>
-              </Tabs>
+              <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 sm:grid-cols-2">
+                {[
+                  ["request", "请求 Request", requestWithHost(detail?.req ?? "", selected)],
+                  ["response", "响应 Response", detail?.resp ?? ""],
+                ].map(([key, label, raw]) => (
+                  <div key={key} className="flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden">
+                    <span className="px-1 text-[11px] font-medium text-muted-foreground">{label}</span>
+                    {detailLoading ? (
+                      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 rounded-md border bg-muted/10 text-xs text-muted-foreground">
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                        加载报文…
+                      </div>
+                    ) : (
+                      <HttpCodeBlock raw={raw} />
+                    )}
+                  </div>
+                ))}
+              </div>
             </>
           )}
         </SheetContent>
