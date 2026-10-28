@@ -37,12 +37,12 @@ const preparationLabels = {
   answering: "正在回答…",
 };
 
-export function SideQuestionButton({ side }: { side: SideQuestions }) {
+export function SideQuestionButton({ side, label = "旁路提问" }: { side: SideQuestions; label?: string }) {
   if (!side.enabled) return null;
   return (
-    <Button variant="outline" size="sm" onClick={() => side.setOpen(true)} title="/btw 旁路提问">
+    <Button variant="outline" size="sm" onClick={() => side.setOpen(true)} title={`/btw ${label}`}>
       <MessageCircleQuestionIcon data-icon="inline-start" />
-      旁路提问
+      {label}
     </Button>
   );
 }

@@ -570,7 +570,12 @@ WHERE type='root_domain' AND domain=$1 LIMIT 1`, root).Scan(&id, &companyID)
 				link(n.Key, companyKey(n.CompanyID))
 			}
 		case "service":
-			link(n.Key, firstOf(subByDomain[n.Domain], ipByAddr[n.IP], rootByDomain[n.RootDomain]))
+			host, _ := hostPortOf(n)
+			link(n.Key, firstOf(
+				subByDomain[n.Domain], subByDomain[host],
+				ipByAddr[n.IP], ipByAddr[host],
+				rootByDomain[n.RootDomain],
+			))
 		case "endpoint":
 			host, port := hostPortOf(n)
 			parent := firstOf(

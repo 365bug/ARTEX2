@@ -225,6 +225,38 @@ func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, abs)
 }
 
+// GET /api/workspace/preview?path=<rel> — serve an image inline for report
+// Markdown. Unlike download, this uses an inline content disposition so a
+// report can render a saved browser screenshot with a normal Markdown image URL.
+func (s *Server) wsPreview(w http.ResponseWriter, r *http.Request) {
+	rawPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	abs, ok := s.wsResolve(rawPath)
+	if filepath.IsAbs(rawPath) {
+		base := filepath.Clean(s.m.dir)
+		candidate := filepath.Clean(rawPath)
+		ok = candidate == base || strings.HasPrefix(candidate, base+string(os.PathSeparator))
+		if ok {
+			abs = candidate
+		}
+	}
+	if !ok {
+		writeErr(w, 400, "非法路径")
+		return
+	}
+	fi, err := os.Stat(abs)
+	if err != nil || fi.IsDir() {
+		writeErr(w, 404, "文件不存在")
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(abs))
+	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" {
+		writeErr(w, 415, "仅支持图片预览")
+		return
+	}
+	w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeFilename(filepath.Base(abs))+"\"")
+	http.ServeFile(w, r, abs)
+}
+
 // POST /api/workspace/upload?path=<dir> — multipart form field "file" (one or more).
 func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
 	dirAbs, ok := s.wsResolve(r.URL.Query().Get("path"))
