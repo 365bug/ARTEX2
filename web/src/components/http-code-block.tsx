@@ -111,6 +111,70 @@ function HighlightedBody({ body, format }: { body: string; format: BodyFormat })
   return body;
 }
 
+/**
+ * Render a packet with the same syntax rules everywhere in the UI.
+ *
+ * `lineNumbers` is disabled by the repeater editor because it already owns a
+ * synchronised gutter. Keeping the tokenisation here prevents packet previews
+ * and editable packet panes from drifting apart visually.
+ */
+export function HttpPacketSyntax({
+  raw,
+  wrapLines = true,
+  lineNumbers = true,
+  emptyFallback = "（空）",
+  lineClassName = "leading-relaxed",
+}: {
+  raw: string;
+  wrapLines?: boolean;
+  lineNumbers?: boolean;
+  emptyFallback?: string;
+  lineClassName?: string;
+}) {
+  const value = raw || emptyFallback;
+  const lines = value.replaceAll("\r\n", "\n").split("\n");
+  const separator = lines.indexOf("");
+  // LLM records and a few provider diagnostics contain a standalone JSON
+  // payload instead of an HTTP head. Treat that as a body too, so those
+  // packet views use the same token colours as captured HTTP traffic.
+  const body = separator >= 0 ? lines.slice(separator + 1).join("\n") : value;
+  const bodyFormat = detectBodyFormat(body);
+  const renderLine = (line: string, index: number) => {
+    if (separator < 0 && bodyFormat !== "plain") return <HighlightedBody body={line} format={bodyFormat} />;
+    if (index === 0) return <StartLine line={line} />;
+    if (separator < 0 || index < separator) return <HeaderLine line={line} />;
+    if (index === separator) return null;
+    return <HighlightedBody body={line} format={bodyFormat} />;
+  };
+
+  return (
+    <>
+      {lines.map((line, index) => (
+        <div
+          key={`${index}-${line}`}
+          data-line={index + 1}
+          className={cn("grid min-w-0", lineClassName, lineNumbers && "grid-cols-[1.5rem_minmax(0,1fr)]")}
+        >
+          {lineNumbers ? (
+            <span className="sticky left-0 self-stretch border-r bg-muted/20 px-1 text-right text-muted-foreground/60">
+              {index + 1}
+            </span>
+          ) : null}
+          <code
+            className={cn(
+              "min-h-[1lh] min-w-0 [tab-size:4]",
+              lineNumbers ? "pr-16 pl-1.5" : "",
+              wrapLines ? "break-words whitespace-pre-wrap" : "whitespace-pre",
+            )}
+          >
+            {renderLine(line, index)}
+          </code>
+        </div>
+      ))}
+    </>
+  );
+}
+
 // Empty grid rows have no text, so native selection copying drops their newlines.
 // Map the selected DOM boundaries back to the raw packet instead.
 function selectedPacketText(container: HTMLElement, value: string, lines: string[]): string | null {
@@ -150,9 +214,6 @@ export function HttpCodeBlock({ raw }: { raw: string }) {
   const [copied, setCopied] = React.useState(false);
   const value = raw || "（空）";
   const lines = value.replaceAll("\r\n", "\n").split("\n");
-  const separator = lines.indexOf("");
-  const body = separator >= 0 ? lines.slice(separator + 1).join("\n") : "";
-  const bodyFormat = detectBodyFormat(body);
 
   React.useEffect(() => {
     if (!copied) return;
@@ -167,13 +228,6 @@ export function HttpCodeBlock({ raw }: { raw: string }) {
       return;
     }
     toast.error("复制失败，请使用 Ctrl/Cmd+A 后复制");
-  };
-
-  const renderLine = (line: string, index: number) => {
-    if (index === 0) return <StartLine line={line} />;
-    if (separator < 0 || index < separator) return <HeaderLine line={line} />;
-    if (index === separator) return null;
-    return <HighlightedBody body={line} format={bodyFormat} />;
   };
 
   return (
@@ -234,22 +288,7 @@ export function HttpCodeBlock({ raw }: { raw: string }) {
           selection.addRange(range);
         }}
       >
-        {lines.map((line, index) => (
-          <div
-            key={`${index}-${line}`}
-            data-line={index + 1}
-            className="grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] leading-relaxed before:sticky before:left-0 before:self-stretch before:border-r before:bg-muted/20 before:px-1 before:text-right before:text-muted-foreground/60 before:content-[attr(data-line)]"
-          >
-            <code
-              className={cn(
-                "min-h-[1lh] min-w-0 pr-16 pl-1.5 [tab-size:4]",
-                wrapLines ? "break-words whitespace-pre-wrap" : "whitespace-pre",
-              )}
-            >
-              {renderLine(line, index)}
-            </code>
-          </div>
-        ))}
+        <HttpPacketSyntax raw={value} wrapLines={wrapLines} />
       </div>
     </div>
   );
