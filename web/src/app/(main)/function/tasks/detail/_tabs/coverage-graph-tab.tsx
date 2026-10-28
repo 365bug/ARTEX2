@@ -29,8 +29,8 @@ import type { CoverageAssetRef, CoverageAssetRefs, CoverageGraphEdge, CoverageGr
 import { cn } from "@/lib/utils";
 
 // 每个父节点下、同一类型的子节点默认展示的数量；超出折叠，"展示更多"每次再拉这么多。
-const FOLD_LIMIT = 20;
-const FOLD_STEP = 20;
+const FOLD_LIMIT = 12;
+const FOLD_STEP = 12;
 
 type Kind = CoverageGraphNode["kind"];
 
@@ -539,9 +539,8 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       await api.startAssetMapping(taskId);
     } finally {
       setMapping(false);
-      fetchGraph();
     }
-  }, [fetchGraph, taskId]);
+  }, [taskId]);
 
   React.useEffect(() => {
     fetchGraph();
@@ -566,8 +565,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   gDataRef.current = {
     nodes: toG6Nodes(renderNodes, new Set(activePath)),
     edges: renderEdges.map((e) => ({
-      source: e.src,
-      target: e.dst,
+      // The API stores child → parent containment. Topology reads naturally
+      // from internet entry → boundary service → internal asset, so reverse
+      // the visual arrow without changing the source graph or lineage logic.
+      source: e.dst,
+      target: e.src,
       active: activePath.includes(e.src) && activePath.includes(e.dst),
     })),
   };
@@ -579,9 +581,8 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     const graph = graphRef.current;
     if (!graph || graph.destroyed) return;
     graph.setData(gDataRef.current);
-    // render() 异步跑 d3-force 布局;若组件在布局落地前被卸载/销毁,g6 会在已清空的
-    // context 上访问 transform 抛错(见 runtime/layout transformDataAfterLayout)。这是纯
-    // teardown 竞态,吞掉它,不影响功能;真正的渲染错误(图未销毁)仍打日志。
+    // render() 异步跑布局;若组件在布局落地前被卸载/销毁,g6 会在已清空的
+    // context 上访问 transform 抛错。这是纯 teardown 竞态,吞掉它,不影响功能。
     void graph.render().catch((err) => {
       if (!graph.destroyed) console.error("[coverage-graph] render:", err);
     });
@@ -631,33 +632,15 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           },
         },
         layout: {
-          type: "d3-force",
-          x: {
-            strength: 0.28,
-            x: (d: unknown) => {
-              const node = renderMapRef.current.get(nd(d).id);
-              const width = containerRef.current?.clientWidth ?? 900;
-              const zone = node && !node.fold ? zoneOf(node.node) : "boundary";
-              return width * (zone === "internet" ? 0.17 : zone === "boundary" ? 0.5 : 0.83);
-            },
-          },
-          y: { strength: 0.04, y: () => (containerRef.current?.clientHeight ?? 600) * 0.52 },
-          collide: { radius: (d: unknown) => (nd(d).size ? nd(d).size : 20) + 8 },
-          link: {
-            distance: (edge: unknown) => {
-              // 顶层（公司/根域名）离子节点远一点，叶子近一点。edge.source 可能是 id 或已解析节点。
-              const s = (edge as { source: string | { id?: string } }).source;
-              const srcId = typeof s === "string" ? s : (s?.id ?? "");
-              const src = renderMapRef.current.get(srcId);
-              const k = src && !src.fold ? src.kind : "endpoint";
-              return k === "company" || k === "root_domain" ? 120 : 60;
-            },
-          },
-          manyBody: {
-            strength: (d: unknown) => (nd(d).kind === "endpoint" || nd(d).fold ? -60 : -200),
-          },
+          // A layered DAG is more legible for network topology than a force
+          // cloud: parents stay on the left and services/assets flow right.
+          type: "dagre",
+          rankdir: "LR",
+          ranker: "network-simplex",
+          nodesep: 34,
+          ranksep: 170,
         },
-        behaviors: ["drag-element-force", "drag-canvas", "zoom-canvas"],
+        behaviors: ["drag-element", "drag-canvas", "zoom-canvas"],
       });
       graph.on("node:click", (evt: unknown) => {
         const id = (evt as { target?: { id?: string } }).target?.id;

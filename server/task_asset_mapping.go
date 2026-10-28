@@ -30,8 +30,33 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 	message := fmt.Sprintf("请重新梳理任务 #%d 的资产关系。只使用当前任务及其直接关联任务的真实资产数据，按互联网入口、边界服务、内网业务三层说明关系；不要探测、不要修改资产库，也不要把没有证据的连接描述成已验证通路。", taskID)
 	if as := s.m.Assets(); as != nil {
 		if graph, err := as.BuildCoverageGraph(taskID, t.ExpID); err == nil {
-			snapshot, _ := json.Marshal(map[string]any{"nodes": graph.Nodes, "edges": graph.Edges})
-			message += "\n\n页面刚读取的任务资产图真实快照如下；优先依据这份快照解释，避免把全局资产误当成本任务资产：\n" + string(snapshot)
+			type nodeSample struct {
+				Key, Kind, Label, Domain, IP string
+				Port                         int
+				Tested, InScope              bool
+			}
+			counts := map[string]int{}
+			sample := make([]nodeSample, 0, 60)
+			for _, node := range graph.Nodes {
+				counts[node.Kind]++
+				if len(sample) < 60 {
+					sample = append(sample, nodeSample{
+						Key: node.Key, Kind: node.Kind, Label: node.Label, Domain: node.Domain,
+						IP: node.IP, Port: node.Port, Tested: node.Tested, InScope: node.InScope,
+					})
+				}
+			}
+			edges := graph.Edges
+			truncatedEdges := len(edges) > 80
+			if truncatedEdges {
+				edges = edges[:80]
+			}
+			snapshot, _ := json.Marshal(map[string]any{
+				"nodes_total": len(graph.Nodes), "edges_total": len(graph.Edges),
+				"counts_by_kind": counts, "node_sample": sample, "edge_sample": edges,
+				"truncated": len(graph.Nodes) > len(sample) || truncatedEdges,
+			})
+			message += "\n\n页面刚读取的任务资产图真实摘要如下；只依据摘要和任务范围解释，避免把全局资产误当成本任务资产。未列出的节点不要逐一补写：\n" + string(snapshot)
 		}
 	}
 	s.StartTriggeredRun("asset_mapper", fmt.Sprintf("资产梳理 · 任务 #%d", taskID), message, taskID, false, description, t.Goal)
