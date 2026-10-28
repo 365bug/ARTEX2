@@ -594,6 +594,26 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     fetchGraph();
   }, [fetchGraph]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    api
+      .assetMappingStatus(taskId)
+      .then((status) => {
+        if (cancelled) return;
+        setMapping(status.running);
+        setMappingConversationId(status.conversation_id ?? null);
+      })
+      .catch(() => {
+        /* status is best effort; the graph remains usable */
+      });
+    setActivePath([]);
+    setSelectedAsset(null);
+    setSelectedFoldId(null);
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+
   const { renderNodes, renderEdges } = React.useMemo(
     () =>
       data
@@ -631,9 +651,16 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     graph.setData(gDataRef.current);
     // render() 异步跑布局;若组件在布局落地前被卸载/销毁,g6 会在已清空的
     // context 上访问 transform 抛错。这是纯 teardown 竞态,吞掉它,不影响功能。
-    void graph.render().catch((err) => {
-      if (!graph.destroyed) console.error("[coverage-graph] render:", err);
-    });
+    void graph
+      .render()
+      .then(() => {
+        if (graph.destroyed) return;
+        const active = gDataRef.current.nodes.filter((node) => node.active).map((node) => node.id);
+        return active.length > 0 ? graph.focusElement(active) : graph.fitView();
+      })
+      .catch((err) => {
+        if (!graph.destroyed) console.error("[coverage-graph] render:", err);
+      });
   }, []);
 
   // 建图（一次）。动态 import 避开 SSR/静态导出期的 window 依赖。

@@ -80,3 +80,29 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 		"status": "accepted", "agent_key": "asset_mapper", "conversation_id": conversation.ID,
 	})
 }
+
+func (s *Server) taskAssetMappingStatus(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	conversations, err := s.m.pg.ListConversations()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	title := fmt.Sprintf("资产梳理 · 任务 #%s", t.ID)
+	for _, conversation := range conversations {
+		if conversation.AgentKey != "asset_mapper" || conversation.Title != title {
+			continue
+		}
+		busyKey := s.convBusyKey(conversation.ID)
+		s.chatMu.Lock()
+		running := s.chatBusy[busyKey]
+		s.chatMu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"running": running, "conversation_id": conversation.ID})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"running": false})
+}
