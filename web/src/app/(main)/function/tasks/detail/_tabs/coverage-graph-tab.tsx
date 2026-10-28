@@ -9,6 +9,7 @@ import {
   Link2,
   type LucideIcon,
   Radio,
+  RotateCcw,
   RefreshCw,
   Server,
   Waypoints,
@@ -35,6 +36,7 @@ const FOLD_STEP = 12;
 type Kind = CoverageGraphNode["kind"];
 
 type Zone = "internet" | "boundary" | "internal";
+type CoverageViewMode = "asset" | "network";
 
 const zoneMeta: Record<Zone, { label: string; description: string; className: string }> = {
   internet: {
@@ -250,7 +252,11 @@ function graphLabel(n: CoverageGraphNode): string {
   return n.label;
 }
 
-function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDatum[] {
+function toG6Nodes(
+  renderNodes: RenderNode[],
+  activeKeys: Set<string>,
+  viewMode: CoverageViewMode,
+): G6NodeDatum[] {
   const buckets: Record<Zone, RenderNode[]> = { internet: [], boundary: [], internal: [] };
   for (const rn of renderNodes) {
     buckets[rn.fold ? "boundary" : zoneOf(rn.node)].push(rn);
@@ -259,11 +265,20 @@ function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDa
   const virtualHeight = Math.max(760, maxCount * 42);
   const positions = new Map<string, { x: number; y: number }>();
   const xByZone: Record<Zone, number> = { internet: 150, boundary: 600, internal: 1050 };
+  const xByAssetKind: Partial<Record<Kind, number>> = {
+    company: 120,
+    root_domain: 180,
+    subdomain: 400,
+    ip: 400,
+    service: 680,
+    app: 680,
+    endpoint: 1000,
+  };
   for (const zone of Object.keys(buckets) as Zone[]) {
     const items = buckets[zone];
     items.forEach((rn, index) => {
       positions.set(rn.key, {
-        x: xByZone[zone],
+        x: viewMode === "network" ? xByZone[zone] : (xByAssetKind[rn.kind] ?? 600),
         y: 70 + ((index + 1) * (virtualHeight - 140)) / (items.length + 1),
       });
     });
@@ -533,6 +548,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const [mapping, setMapping] = React.useState(false);
   const [mappingConversationId, setMappingConversationId] = React.useState<number | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = React.useState<Date | null>(null);
+  const [viewMode, setViewMode] = React.useState<CoverageViewMode>("asset");
+  const [viewport, setViewport] = React.useState<{ zoom: number; position: [number, number] }>({
+    zoom: 1,
+    position: [0, 0],
+  });
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const graphRef = React.useRef<G6Graph | null>(null);
@@ -543,6 +563,24 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     edges: [],
   });
   const graphDataRef = React.useRef<typeof data>(null);
+
+  const syncViewport = React.useCallback(() => {
+    const graph = graphRef.current;
+    if (!graph || graph.destroyed) return;
+    const position = graph.getPosition();
+    setViewport({ zoom: graph.getZoom(), position: [position[0], position[1]] });
+  }, []);
+
+  const resetView = React.useCallback(async () => {
+    setActivePath([]);
+    setSelectedAsset(null);
+    setSelectedFoldId(null);
+    const graph = graphRef.current;
+    if (!graph || graph.destroyed) return;
+    await graph.zoomTo(1);
+    await graph.fitCenter();
+    syncViewport();
+  }, [syncViewport]);
 
   const fetchGraph = React.useCallback(() => {
     setLoading(true);
@@ -631,13 +669,13 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   // 结构签名：只在可见节点/边集合变化时重建图 + 重跑布局，避免无谓抖动。
   const sig = React.useMemo(
     () =>
-      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}|${activePath.join(",")}`,
-    [activePath, renderNodes, renderEdges],
+      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}|${activePath.join(",")}|${viewMode}`,
+    [activePath, renderNodes, renderEdges, viewMode],
   );
 
   // 维护 gDataRef + renderMapRef（供事件与图数据应用读取）。
   gDataRef.current = {
-    nodes: toG6Nodes(renderNodes, new Set(activePath)),
+    nodes: toG6Nodes(renderNodes, new Set(activePath), viewMode),
     edges: renderEdges.map((e) => ({
       // The API stores child → parent containment. Topology reads naturally
       // from internet entry → boundary service → internal asset, so reverse
@@ -665,12 +703,13 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         // Keep the zone columns at their assigned coordinates. fitView rescales
         // to the bounds of the current nodes, so an empty zone causes the
         // remaining nodes to slide into the next column.
-        return active.length > 0 ? graph.focusElement(active) : graph.fitCenter();
+        const result = active.length > 0 ? graph.focusElement(active) : graph.fitCenter();
+        return result.then(() => syncViewport());
       })
       .catch((err) => {
         if (!graph.destroyed) console.error("[coverage-graph] render:", err);
       });
-  }, []);
+  }, [syncViewport]);
 
   // 建图（一次）。动态 import 避开 SSR/静态导出期的 window 依赖。
   React.useEffect(() => {
@@ -717,6 +756,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         },
         behaviors: ["drag-element", "drag-canvas", "zoom-canvas"],
       });
+      graph.on("aftertransform", syncViewport);
       graph.on("node:click", (evt: unknown) => {
         const id = (evt as { target?: { id?: string } }).target?.id;
         if (!id) return;
@@ -738,7 +778,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           cursor = parents.get(cursor);
         }
         setActivePath(lineage);
-        void graph?.focusElement(lineage);
+        void graph?.focusElement(lineage).then(() => syncViewport());
       });
       graphRef.current = graph;
       applyData();
@@ -754,7 +794,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       graph?.destroy();
       graphRef.current = null;
     };
-  }, [applyData]);
+  }, [applyData, syncViewport]);
 
   // 可见集合变化 → 重新灌数据 + 布局。sig 只作为重排触发器（applyData 读 gDataRef）。
   // biome-ignore lint/correctness/useExhaustiveDependencies: sig 是刻意的重排触发依赖
@@ -784,23 +824,38 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-100/80 dark:bg-slate-950/30">
-      <div className="pointer-events-none absolute inset-0 z-0 grid grid-cols-3">
-        {(Object.keys(zoneMeta) as Zone[]).map((zone, index) => (
+      {viewMode === "network" ? (
+        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
           <div
-            key={zone}
-            className={cn("relative border-r border-slate-200/80 dark:border-slate-800/80", zoneMeta[zone].className, index === 2 && "border-r-0")}
+            className="absolute top-12 left-0 grid h-[8000px] w-[1350px] grid-cols-3"
+            style={{
+              transform: `translate(${viewport.position[0]}px, ${viewport.position[1]}px) scale(${viewport.zoom})`,
+              transformOrigin: "0 0",
+            }}
           >
-            <div className="absolute top-3 left-4">
-              <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
-              <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
-            </div>
+            {(Object.keys(zoneMeta) as Zone[]).map((zone, index) => (
+              <div
+                key={zone}
+                className={cn("relative border-r border-slate-200/80 dark:border-slate-800/80", zoneMeta[zone].className, index === 2 && "border-r-0")}
+              >
+                <div className="absolute top-3 left-4">
+                  <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
+                  <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute top-3 left-4 z-0">
+          <div className="text-foreground/80 text-sm font-semibold">资产关系图</div>
+          <div className="text-muted-foreground mt-0.5 text-[11px]">按资产层级展示关联关系</div>
+        </div>
+      )}
       <div ref={containerRef} className="relative z-10 h-full w-full pt-12" />
 
       {/* 图例 + 统计 + 刷新（叠加层） */}
-      <div className="bg-card/95 pointer-events-auto absolute bottom-3 left-3 z-20 flex max-h-[calc(100%-1.5rem)] max-w-[360px] flex-col gap-2.5 overflow-auto rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+      <div className="bg-card/95 pointer-events-auto absolute bottom-3 left-3 z-20 flex max-h-[calc(100%-1.5rem)] max-w-[480px] flex-col gap-2.5 overflow-auto rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
@@ -833,9 +888,39 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           ) : (
             <span className="text-muted-foreground">{loading ? "加载中…" : "暂无范围内资产（先锚定任务范围）"}</span>
           )}
-          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void remapAssets()} disabled={mapping} title="重新梳理资产">
-            <RefreshCw className={cn("size-3.5", (loading || mapping) && "animate-spin")} />
-            <span className="hidden sm:inline">{mapping ? "正在梳理…" : "重新梳理"}</span>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void resetView()} title="重置视图">
+              <RotateCcw className="size-3.5" />
+              <span className="hidden sm:inline">重置视图</span>
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void remapAssets()} disabled={mapping} title="重新梳理资产">
+              <RefreshCw className={cn("size-3.5", (loading || mapping) && "animate-spin")} />
+              <span className="hidden sm:inline">{mapping ? "正在梳理…" : "重新梳理"}</span>
+            </Button>
+          </div>
+        </div>
+        <div className="bg-muted/60 flex items-center gap-1 rounded-md p-1">
+          <Button
+            variant={viewMode === "asset" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 flex-1 px-2 text-xs"
+            onClick={() => {
+              setViewMode("asset");
+              void resetView();
+            }}
+          >
+            资产关系图
+          </Button>
+          <Button
+            variant={viewMode === "network" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 flex-1 px-2 text-xs"
+            onClick={() => {
+              setViewMode("network");
+              void resetView();
+            }}
+          >
+            网络拓扑
           </Button>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
