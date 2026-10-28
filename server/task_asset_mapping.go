@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 // taskAssetMapping starts a visible asset-mapper conversation for the task and
@@ -26,7 +27,6 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
-	description := strings.TrimSpace(t.Description)
 	message := fmt.Sprintf("请重新梳理任务 #%d 的资产关系。只使用当前任务及其直接关联任务的真实资产数据，按互联网入口、边界服务、内网业务三层说明关系；不要探测、不要修改资产库，也不要把没有证据的连接描述成已验证通路。", taskID)
 	if as := s.m.Assets(); as != nil {
 		if graph, err := as.BuildCoverageGraph(taskID, t.ExpID); err == nil {
@@ -59,6 +59,24 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 			message += "\n\n页面刚读取的任务资产图真实摘要如下；只依据摘要和任务范围解释，避免把全局资产误当成本任务资产。未列出的节点不要逐一补写：\n" + string(snapshot)
 		}
 	}
-	s.StartTriggeredRun("asset_mapper", fmt.Sprintf("资产梳理 · 任务 #%d", taskID), message, taskID, false, description, t.Goal)
-	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted", "agent_key": "asset_mapper"})
+	title := fmt.Sprintf("资产梳理 · 任务 #%d", taskID)
+	conversation, err := s.m.pg.CreateConversation("asset_mapper", title, nil)
+	if err != nil || conversation == nil {
+		writeErr(w, http.StatusInternalServerError, "创建资产梳理会话失败")
+		return
+	}
+	if _, err := s.m.pg.AppendConvActivity(conversation.ID, db.Activity{
+		Worker: "asset_mapper", Kind: "user", Summary: title, Detail: message,
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "写入资产梳理会话失败")
+		return
+	}
+	busyKey := s.convBusyKey(conversation.ID)
+	s.chatMu.Lock()
+	s.chatBusy[busyKey] = true
+	s.chatMu.Unlock()
+	s.runConversation(conversation, message, busyKey, message)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status": "accepted", "agent_key": "asset_mapper", "conversation_id": conversation.ID,
+	})
 }

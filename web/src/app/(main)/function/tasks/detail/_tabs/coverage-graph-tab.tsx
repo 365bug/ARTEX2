@@ -216,6 +216,8 @@ type G6NodeDatum = {
   lbl: string;
   size: number;
   active: boolean;
+  x: number;
+  y: number;
 };
 
 type G6EdgeDatum = { source: string; target: string; active: boolean };
@@ -245,7 +247,25 @@ function graphLabel(n: CoverageGraphNode): string {
 }
 
 function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDatum[] {
+  const buckets: Record<Zone, RenderNode[]> = { internet: [], boundary: [], internal: [] };
+  for (const rn of renderNodes) {
+    buckets[rn.fold ? "boundary" : zoneOf(rn.node)].push(rn);
+  }
+  const maxCount = Math.max(buckets.internet.length, buckets.boundary.length, buckets.internal.length, 1);
+  const virtualHeight = Math.max(760, maxCount * 42);
+  const positions = new Map<string, { x: number; y: number }>();
+  const xByZone: Record<Zone, number> = { internet: 150, boundary: 600, internal: 1050 };
+  for (const zone of Object.keys(buckets) as Zone[]) {
+    const items = buckets[zone];
+    items.forEach((rn, index) => {
+      positions.set(rn.key, {
+        x: xByZone[zone],
+        y: 70 + ((index + 1) * (virtualHeight - 140)) / (items.length + 1),
+      });
+    });
+  }
   return renderNodes.map((rn) => {
+    const position = positions.get(rn.key) ?? { x: 600, y: virtualHeight / 2 };
     if (rn.fold) {
       return {
         id: rn.key,
@@ -256,6 +276,7 @@ function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDa
         lbl: `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
         size: 24,
         active: activeKeys.has(rn.key),
+        ...position,
       };
     }
     return {
@@ -267,6 +288,7 @@ function toG6Nodes(renderNodes: RenderNode[], activeKeys: Set<string>): G6NodeDa
       lbl: trunc(graphLabel(rn.node) || kindMeta[rn.kind].label),
       size: kindMeta[rn.kind].size,
       active: activeKeys.has(rn.key),
+      ...position,
     };
   });
 }
@@ -503,6 +525,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const [activePath, setActivePath] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [mapping, setMapping] = React.useState(false);
+  const [mappingConversationId, setMappingConversationId] = React.useState<number | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = React.useState<Date | null>(null);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -536,11 +559,36 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const remapAssets = React.useCallback(async () => {
     setMapping(true);
     try {
-      await api.startAssetMapping(taskId);
-    } finally {
+      const run = await api.startAssetMapping(taskId);
+      setMappingConversationId(run.conversation_id);
+    } catch {
       setMapping(false);
     }
   }, [taskId]);
+
+  React.useEffect(() => {
+    if (!mappingConversationId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const state = await api.conversationMessages(mappingConversationId, 0);
+        if (cancelled) return;
+        if (!state.running) {
+          setMapping(false);
+          setMappingConversationId(null);
+          fetchGraph();
+        }
+      } catch {
+        // Keep the spinner while the conversation endpoint is temporarily unavailable.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [fetchGraph, mappingConversationId]);
 
   React.useEffect(() => {
     fetchGraph();
@@ -632,13 +680,10 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           },
         },
         layout: {
-          // A layered DAG is more legible for network topology than a force
-          // cloud: parents stay on the left and services/assets flow right.
-          type: "dagre",
-          rankdir: "LR",
-          ranker: "network-simplex",
-          nodesep: 34,
-          ranksep: 170,
+          // Positions are assigned by zone in toG6Nodes. Preset layout keeps
+          // internet, boundary and internal assets in their corresponding
+          // columns instead of letting a graph ranker collapse everything.
+          type: "preset",
         },
         behaviors: ["drag-element", "drag-canvas", "zoom-canvas"],
       });
@@ -733,7 +778,13 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             <div className="min-w-0">
               <div className="text-foreground font-medium">资产梳理 Agent</div>
               <div className="text-muted-foreground truncate text-[11px]">
-                {loading ? "正在更新资产关系…" : lastSyncedAt ? `最近更新 ${lastSyncedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "等待首次梳理"}
+                {mapping
+                  ? "正在梳理资产关系…"
+                  : loading
+                    ? "正在更新资产关系…"
+                    : lastSyncedAt
+                      ? `最近更新 ${lastSyncedAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+                      : "等待首次梳理"}
               </div>
             </div>
           </div>
@@ -753,7 +804,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           )}
           <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => void remapAssets()} disabled={mapping} title="重新梳理资产">
             <RefreshCw className={cn("size-3.5", (loading || mapping) && "animate-spin")} />
-            <span className="hidden sm:inline">重新梳理</span>
+            <span className="hidden sm:inline">{mapping ? "正在梳理…" : "重新梳理"}</span>
           </Button>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
