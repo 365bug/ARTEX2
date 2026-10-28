@@ -591,6 +591,8 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     zoom: 1,
     position: [0, 0],
   });
+  const viewModeRef = React.useRef<CoverageViewMode>(viewMode);
+  viewModeRef.current = viewMode;
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const graphRef = React.useRef<G6Graph | null>(null);
@@ -609,14 +611,21 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     setViewport({ zoom: graph.getZoom(), position: [position[0], position[1]] });
   }, []);
 
-  const resetView = React.useCallback(async () => {
+  const resetView = React.useCallback(async (mode: CoverageViewMode = viewModeRef.current) => {
     setActivePath([]);
     setSelectedAsset(null);
     setSelectedFoldId(null);
     const graph = graphRef.current;
     if (!graph || graph.destroyed) return;
     await graph.zoomTo(1);
-    await graph.fitCenter();
+    if (mode === "network") {
+      // Network coordinates are already assigned to the three fixed zone
+      // columns. Centering a graph with an empty zone shifts every node into
+      // the next visible column and makes the background regions misleading.
+      await graph.translateTo([0, 0]);
+    } else {
+      await graph.fitCenter();
+    }
     syncViewport();
   }, [syncViewport]);
 
@@ -753,10 +762,14 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       .then(() => {
         if (graph.destroyed) return;
         const active = gDataRef.current.nodes.filter((node) => node.active).map((node) => node.id);
-        // Keep the zone columns at their assigned coordinates. fitView rescales
-        // to the bounds of the current nodes, so an empty zone causes the
-        // remaining nodes to slide into the next column.
-        const result = active.length > 0 ? graph.focusElement(active) : graph.fitCenter();
+        // Keep the zone columns at their assigned coordinates. Centering a
+        // network graph with an empty zone causes the remaining nodes to slide
+        // into the next column, so network mode starts at the fixed origin.
+        const result = active.length > 0
+          ? graph.focusElement(active)
+          : viewModeRef.current === "network"
+            ? graph.translateTo([0, 0])
+            : graph.fitCenter();
         return result.then(() => syncViewport());
       })
       .catch((err) => {
@@ -774,7 +787,8 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       graph = new Graph({
         container: containerRef.current,
         autoResize: true,
-        autoFit: "center",
+        // Asset mode explicitly centers after rendering. Network mode keeps
+        // its fixed world coordinates so the three background zones align.
         background: "transparent",
         node: {
           style: {
@@ -984,7 +998,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             className="h-7 flex-1 px-2 text-xs"
             onClick={() => {
               setViewMode("asset");
-              void resetView();
+              void resetView("asset");
             }}
           >
             资产关系图
@@ -995,7 +1009,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             className="h-7 flex-1 px-2 text-xs"
             onClick={() => {
               setViewMode("network");
-              void resetView();
+              void resetView("network");
             }}
           >
             网络拓扑
