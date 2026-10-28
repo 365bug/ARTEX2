@@ -970,6 +970,8 @@ export interface TrafficHost {
 // ---- App settings (runtime toggles) ----
 export interface Settings {
   traffic_capture: boolean;
+  /** 是否向可见 Agent 暴露浏览器 MCP 的截图工具。默认关闭。 */
+  browser_screenshot_enabled?: boolean;
   credential_agent_enabled: boolean;
   credential_traffic_binding: boolean;
   task_intelligence_enabled: boolean; // 默认关闭；关闭不注入情报工具或提示
@@ -991,7 +993,7 @@ export interface Settings {
   // 全局出口代理(http/https/socks5，可带 user:pass)，所有目标流量走它。开启流量捕获时作为
   // MITM 上游；关闭捕获时直接注入 agent 的 bash/WebFetch。空=直连。
   global_proxy?: string;
-	show_egress_ip?: boolean; // 在顶栏显示直连 / 全局代理出口 IP；默认关闭
+  show_egress_ip?: boolean; // 在顶栏显示直连 / 全局代理出口 IP；默认关闭
   python_interpreter?: string; // 自定义脚本工具的 python 解释器路径(空=运行时检测)
   workers?: number; // 并发工作 agent 数(默认3)；对之后启动的任务生效
   worker_pools: WorkerPool[];

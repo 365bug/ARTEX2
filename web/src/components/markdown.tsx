@@ -18,6 +18,21 @@ const components: Components = {
   a: ({ node, ...p }) => (
     <a className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer" {...p} />
   ),
+  img: ({ node, src, alt, ...p }) => {
+    const resolvedSrc =
+      typeof src === "string" && src.startsWith("workspace://")
+        ? `/api/workspace/preview?path=${encodeURIComponent(src.slice("workspace://".length))}`
+        : src;
+    return (
+      <img
+        className="my-2 max-h-[520px] max-w-full rounded-md border object-contain"
+        src={resolvedSrc}
+        alt={alt || "报告截图"}
+        loading="lazy"
+        {...p}
+      />
+    );
+  },
   hr: () => <hr className="my-2 border-border" />,
   blockquote: ({ node, ...p }) => (
     <blockquote className="my-1 border-l-2 border-border pl-2.5 text-muted-foreground" {...p} />
@@ -42,9 +57,7 @@ const components: Components = {
       <table className="w-full border-collapse text-xs" {...p} />
     </div>
   ),
-  th: ({ node, ...p }) => (
-    <th className="border border-border bg-muted/60 px-2 py-1 text-left font-medium" {...p} />
-  ),
+  th: ({ node, ...p }) => <th className="border border-border bg-muted/60 px-2 py-1 text-left font-medium" {...p} />,
   td: ({ node, ...p }) => <td className="border border-border px-2 py-1 align-top" {...p} />,
 };
 

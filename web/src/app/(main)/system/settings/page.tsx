@@ -2,7 +2,15 @@
 
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
+import {
+  CameraIcon,
+  CpuIcon,
+  FlaskConicalIcon,
+  KeyboardIcon,
+  RadioTowerIcon,
+  SearchIcon,
+  ShieldAlertIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +37,7 @@ export default function SystemSettingsPage() {
   const [chatAutoTitleEnabled, setChatAutoTitleEnabled] = React.useState(false);
   const [savingIntelligence, setSavingIntelligence] = React.useState(false);
   const [trafficCapture, setTrafficCapture] = React.useState(false);
+  const [browserScreenshot, setBrowserScreenshot] = React.useState(false);
   const [agentTrafficBinding, setAgentTrafficBinding] = React.useState(false);
   const [webSearch, setWebSearch] = React.useState(false);
   const [backend, setBackend] = React.useState("ddgs");
@@ -86,6 +95,7 @@ export default function SystemSettingsPage() {
     setTaskAutoTitleEnabled(!!s.task_auto_title_enabled);
     setChatAutoTitleEnabled(!!s.chat_auto_title_enabled);
     setTrafficCapture(!!s.traffic_capture);
+    setBrowserScreenshot(!!s.browser_screenshot_enabled);
     setAgentTrafficBinding(!!s.agent_traffic_binding);
     setWebSearch(!!s.web_search_enabled);
     setBackend(s.web_search_backend || "ddgs");
@@ -213,6 +223,22 @@ export default function SystemSettingsPage() {
       .finally(() => setSaving(false));
   };
 
+  const toggleBrowserScreenshot = (v: boolean) => {
+    setBrowserScreenshot(v);
+    setSaving(true);
+    api
+      .setSettings({ browser_screenshot_enabled: v })
+      .then((s) => {
+        apply(s);
+        toast.success(v ? "已开启浏览器截图工具" : "已关闭浏览器截图工具");
+      })
+      .catch((e) => {
+        setBrowserScreenshot(!v);
+        toast.error(`保存失败：${(e as Error).message}`);
+      })
+      .finally(() => setSaving(false));
+  };
+
   const toggleInjectPlanner = (v: boolean) => {
     setInjectPlanner(v); // optimistic
     api
@@ -262,9 +288,7 @@ export default function SystemSettingsPage() {
   const toggleAutoTitle = (key: "task_auto_title_enabled" | "chat_auto_title_enabled", value: boolean) => {
     const setter = key === "task_auto_title_enabled" ? setTaskAutoTitleEnabled : setChatAutoTitleEnabled;
     const patch: Partial<Settings> =
-      key === "task_auto_title_enabled"
-        ? { task_auto_title_enabled: value }
-        : { chat_auto_title_enabled: value };
+      key === "task_auto_title_enabled" ? { task_auto_title_enabled: value } : { chat_auto_title_enabled: value };
     setter(value);
     api
       .setSettings(patch)
@@ -500,6 +524,31 @@ export default function SystemSettingsPage() {
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
+              <CameraIcon className="size-4" />
+              浏览器截图
+            </CardTitle>
+            <CardDescription>
+              开启后，报告撰写 Agent 会自动获得 browser
+              MCP，并在复现步骤对应的页面上保存截图，报告中直接显示对应步骤截图。 截图会增加 Token
+              消耗；关闭后不会自动给报告撰写 Agent 授权截图能力，已有历史报告保留原截图。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-4">
+            <Label htmlFor="browser-screenshot" className="text-sm font-normal text-muted-foreground">
+              {browserScreenshot ? "已开启 · 报告撰写 Agent 自动截图" : "已关闭 · 报告不自动截图"}
+            </Label>
+            <Switch
+              id="browser-screenshot"
+              checked={browserScreenshot}
+              disabled={!loaded || saving}
+              onCheckedChange={toggleBrowserScreenshot}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
               <RadioTowerIcon className="size-4" />
               全局代理
             </CardTitle>
@@ -510,9 +559,8 @@ export default function SystemSettingsPage() {
               开启<b>流量捕获</b>时，它作为记录代理的<b>上游</b>（流量仍全量落库，再经此代理出网）；关闭捕获时，直接注入
               Agent 的 bash / WebFetch 出网。与网络搜索代理、LLM 代理相互独立。
               <br />
-              <b>提示</b>：socks5 在<b>关闭捕获</b>时依赖各命令行工具对 <code>ALL_PROXY</code> 的支持——curl
-              可用，python urllib 等会直接报错； 若主要用 socks5，建议开启流量捕获——此路径由 MITM
-              亲自拨号，工具无感知、稳定生效。
+              <b>提示</b>：socks5 在<b>关闭捕获</b>时依赖各命令行工具对 <code>ALL_PROXY</code> 的支持——curl 可用，python
+              urllib 等会直接报错； 若主要用 socks5，建议开启流量捕获——此路径由 MITM 亲自拨号，工具无感知、稳定生效。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
@@ -537,12 +585,7 @@ export default function SystemSettingsPage() {
                 保存
               </Button>
               {/* 测表单里当前的值，不要求先保存。 */}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={testEgress}
-                disabled={!loaded || egressTesting}
-              >
+              <Button type="button" variant="outline" onClick={testEgress} disabled={!loaded || egressTesting}>
                 {egressTesting ? "测试中…" : "测试"}
               </Button>
             </div>
@@ -567,15 +610,13 @@ export default function SystemSettingsPage() {
             </div>
             {/* 紧贴结果区：用户看两行时正好需要它。细节放文档。 */}
             <p className="text-muted-foreground text-xs leading-relaxed">
-              点<b>测试</b>会访问 IP 回显服务（默认 <code>api.ipify.org</code>，失败自动换{" "}
-              <code>ifconfig.me</code>），它返回"这个请求从哪个 IP 来"。
-              ① 是不走代理时的 IP，② 是经全局代理出网时的 IP。改完不用先保存，直接测。
+              点<b>测试</b>会访问 IP 回显服务（默认 <code>api.ipify.org</code>，失败自动换 <code>ifconfig.me</code>
+              ），它返回"这个请求从哪个 IP 来"。 ① 是不走代理时的 IP，② 是经全局代理出网时的
+              IP。改完不用先保存，直接测。
             </p>
             {/* 内网里公网回显不可达，两行都会失败——不是代理坏了。 */}
             <details className="text-xs">
-              <summary className="text-muted-foreground cursor-pointer select-none">
-                自定义 IP 探测服务（可选）
-              </summary>
+              <summary className="text-muted-foreground cursor-pointer select-none">自定义 IP 探测服务（可选）</summary>
               <div className="mt-2 flex flex-col gap-1">
                 <Input
                   autoComplete="off"
@@ -587,10 +628,9 @@ export default function SystemSettingsPage() {
                   }}
                 />
                 <span className="text-muted-foreground leading-relaxed">
-                  自定义 IP 探测服务需返回纯文本 IP 或{" "}
-                  <code>{'{"ip":"1.2.3.4"}'}</code> 格式的 JSON。
-                  若内网环境下无法访问公网，或本机和内网代理共用同一个公网出口，
-                  则可替换为内网 IP 探测服务，此时 ① 和 ② 的 IP 不同，就说明流量走了内网代理。
+                  自定义 IP 探测服务需返回纯文本 IP 或 <code>{'{"ip":"1.2.3.4"}'}</code> 格式的 JSON。
+                  若内网环境下无法访问公网，或本机和内网代理共用同一个公网出口， 则可替换为内网 IP 探测服务，此时 ① 和 ②
+                  的 IP 不同，就说明流量走了内网代理。
                 </span>
               </div>
             </details>
@@ -603,11 +643,7 @@ export default function SystemSettingsPage() {
                     <div key={c.key} className="flex flex-wrap items-center gap-x-2">
                       <span
                         className={
-                          c.skipped
-                            ? "text-muted-foreground"
-                            : c.result.ok
-                              ? "text-emerald-600"
-                              : "text-destructive"
+                          c.skipped ? "text-muted-foreground" : c.result.ok ? "text-emerald-600" : "text-destructive"
                         }
                       >
                         {c.skipped ? "—" : c.result.ok ? "✓" : "✗"}
@@ -629,18 +665,12 @@ export default function SystemSettingsPage() {
                         <span className="text-muted-foreground">{c.skip_reason}</span>
                       ) : c.result.ok ? (
                         <span className="font-mono">
-                          <span title="外界看到的出口 IP（探测站点回显的客户端地址）">
-                            {c.result.exit_ip}
-                          </span>{" "}
-                          ·{" "}
+                          <span title="外界看到的出口 IP（探测站点回显的客户端地址）">{c.result.exit_ip}</span> ·{" "}
                           <span title="从 ARTEX 发出请求到拿到响应的完整往返耗时；经代理时包含代理那一跳">
                             {c.result.latency_ms}ms
                           </span>
                           {c.result.via && c.result.via !== "direct" && !viaCapture && (
-                            <span className="text-muted-foreground">
-                              {" "}
-                              · 经 {c.result.via_label ?? c.result.via}
-                            </span>
+                            <span className="text-muted-foreground"> · 经 {c.result.via_label ?? c.result.via}</span>
                           )}
                         </span>
                       ) : (
@@ -733,7 +763,9 @@ export default function SystemSettingsPage() {
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle>自动标题</CardTitle>
-            <CardDescription>为 Agent 创建的任务和对话首条消息生成简短标题。两个开关独立生效，默认关闭。</CardDescription>
+            <CardDescription>
+              为 Agent 创建的任务和对话首条消息生成简短标题。两个开关独立生效，默认关闭。
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <Field orientation="horizontal">
@@ -751,7 +783,9 @@ export default function SystemSettingsPage() {
             <Field orientation="horizontal" className="mt-5">
               <FieldContent>
                 <FieldLabel htmlFor="chat-auto-title">会话标题</FieldLabel>
-                <FieldDescription>对话首条消息后自动生成会话标题；先显示消息截断文本，失败时保留截断标题。</FieldDescription>
+                <FieldDescription>
+                  对话首条消息后自动生成会话标题；先显示消息截断文本，失败时保留截断标题。
+                </FieldDescription>
               </FieldContent>
               <Switch
                 id="chat-auto-title"
