@@ -16,6 +16,26 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { FindingTrafficDetail, TrafficDetail } from "@/lib/types";
 
+function formatCapturedAt(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return "";
+  const numeric = typeof value === "number" ? value : Number(value);
+  const date = Number.isFinite(numeric)
+    ? new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric)
+    : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(date)
+    .replace(/\//g, "-");
+}
+
 export function TrafficEvidenceViewer({
   findingId,
   bindingId,
@@ -97,9 +117,16 @@ export function TrafficEvidenceViewer({
           <div className="flex flex-wrap items-start justify-between gap-2 pe-8">
             <div>
               <DialogTitle>流量证据 #{bindingId}</DialogTitle>
-              <DialogDescription className="break-all">
-                {detail?.binding.snapshot.url ?? "查看绑定时保存的请求与响应"}
-              </DialogDescription>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <DialogDescription className="break-all">
+                  {detail?.binding.snapshot.url ?? "查看绑定时保存的请求与响应"}
+                </DialogDescription>
+                {detail ? (
+                  <span className="shrink-0 text-muted-foreground text-xs">
+                    采集时间：{formatCapturedAt(detail.binding.snapshot.captured_at) || "未知"}
+                  </span>
+                ) : null}
+              </div>
             </div>
             {detail ? (
               <Button variant="outline" size="sm" onClick={openRepeater}>
