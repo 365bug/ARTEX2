@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -269,11 +270,17 @@ func (s *Server) wsPreview(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(rawRel, "findings/screenshots/") || strings.HasPrefix(rel, "findings/screenshots/") || strings.Contains(rel, "/findings/screenshots/") {
 			// The frontend renders this as a small top-right overlay. Use the
 			// file mtime so the label reflects capture/save time, not view time.
-			w.Header().Set("X-Report-Screenshot-Timestamp", fi.ModTime().Format("2006-01-02 15:04:05"))
+			// Containers may run with UTC even when the host is configured for
+			// China Standard Time, so make the report display zone explicit.
+			w.Header().Set("X-Report-Screenshot-Timestamp", reportScreenshotTimestamp(fi.ModTime()))
 		}
 	}
 	w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeFilename(filepath.Base(abs))+"\"")
 	http.ServeFile(w, r, abs)
+}
+
+func reportScreenshotTimestamp(t time.Time) string {
+	return t.In(time.FixedZone("CST", 8*60*60)).Format("2006-01-02 15:04:05")
 }
 
 func (s *Server) findSessionPreview(rawPath string) (string, bool) {

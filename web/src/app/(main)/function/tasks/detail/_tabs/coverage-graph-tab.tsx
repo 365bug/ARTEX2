@@ -58,9 +58,12 @@ const zoneMeta: Record<Zone, { label: string; description: string; className: st
   },
 };
 
-// 当前后端资产关系以域名、服务和业务资产为主，先用类型推导可视化分区。
-// 后续接入 VPC/网段/防火墙数据后，可以直接由 API 返回 zone 覆盖这里的推导结果。
+// 新数据优先使用后端基于地址/暴露证据计算出的权威区域；旧数据没有
+// zone 时才使用类型回退，避免公网 endpoint 被类型规则误放到内网。
 function zoneOf(node: CoverageGraphNode): Zone {
+  if (node.zone === "internet" || node.zone === "boundary" || node.zone === "internal") {
+    return node.zone;
+  }
   if (node.kind === "company" || node.kind === "root_domain" || node.kind === "subdomain" || node.kind === "ip") {
     return "internet";
   }
@@ -163,6 +166,7 @@ function computeVisible(
   nodes: CoverageGraphNode[],
   edges: CoverageGraphEdge[],
   expanded: Map<string, number>,
+  showAllNetworkNodes = false,
 ): { renderNodes: RenderNode[]; renderEdges: CoverageGraphEdge[] } {
   const byKey = new Map(nodes.map((n) => [n.key, n]));
   const parentOf = new Map<string, string>();
@@ -202,7 +206,9 @@ function computeVisible(
     for (const [kind, arr] of groups) {
       arr.sort(sortChildren);
       const groupId = `${parent}::${kind}`;
-      const shown = expanded.get(groupId) ?? FOLD_LIMIT;
+      // Network mode should show the complete topology for ordinary task
+      // sizes. Keep folding as a safety valve for very large inventories.
+      const shown = showAllNetworkNodes && arr.length <= 80 ? arr.length : (expanded.get(groupId) ?? FOLD_LIMIT);
       const visibleChildren = arr.slice(0, shown);
       const hidden = arr.slice(shown);
       for (const c of visibleChildren) {
@@ -259,7 +265,16 @@ function trunc(s: string, n = 26): string {
 // 其余类型沿用后端给的 label。
 function graphLabel(n: CoverageGraphNode, viewMode: CoverageViewMode = "asset"): string {
   if (viewMode === "network") {
-    if (n.kind === "endpoint") return "";
+    if (n.kind === "endpoint") {
+      if (n.url) {
+        try {
+          return new URL(n.url).pathname || "/";
+        } catch {
+          /* 非法 URL：回退到资产标签 */
+        }
+      }
+      return n.label || n.domain || n.ip || "端点";
+    }
     if (n.kind === "service") {
       const engine = databaseEngine(n);
       const host = n.domain || n.ip || n.label;
@@ -293,27 +308,79 @@ function toG6Nodes(
   for (const rn of renderNodes) {
     buckets[rn.fold ? "boundary" : zoneOf(rn.node)].push(rn);
   }
-  const maxCount = Math.max(buckets.internet.length, buckets.boundary.length, buckets.internal.length, 1);
-  const virtualHeight = Math.max(760, maxCount * 42);
+  const maxRows = Math.max(
+    ...(["internet", "boundary", "internal"] as Zone[]).map((zone) => Math.ceil(buckets[zone].length / 2)),
+    1,
+  );
+  const virtualHeight = viewMode === "network" ? Math.max(760, maxRows * 78 + 120) : Math.max(760, Math.max(buckets.internet.length, buckets.boundary.length, buckets.internal.length, 1) * 42);
   const positions = new Map<string, { x: number; y: number }>();
   const xByZone: Record<Zone, number> = { internet: 150, boundary: 600, internal: 1050 };
   const xByAssetKind: Partial<Record<Kind, number>> = {
     company: 120,
     root_domain: 180,
-    subdomain: 400,
-    ip: 400,
+    subdomain: 360,
+    ip: 520,
     service: 680,
     app: 680,
     endpoint: 1000,
   };
-  for (const zone of Object.keys(buckets) as Zone[]) {
-    const items = buckets[zone];
+  const placeGrid = (items: RenderNode[], left: number, right: number) => {
+    if (items.length === 0) return;
+    // Keep the layout deterministic while using multiple columns. A wider
+    // graph gets more columns, so large asset groups stop forming a single
+    // unreadable vertical chain.
+    const columns = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(items.length / 1.5))));
+    const rows = Math.ceil(items.length / columns);
     items.forEach((rn, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
       positions.set(rn.key, {
-        x: viewMode === "network" ? xByZone[zone] : (xByAssetKind[rn.kind] ?? 600),
-        y: 70 + ((index + 1) * (virtualHeight - 140)) / (items.length + 1),
+        x: left + ((column + 1) * (right - left)) / (columns + 1),
+        y: 70 + ((row + 1) * (virtualHeight - 140)) / (rows + 1),
       });
     });
+  };
+
+  if (viewMode === "network") {
+    const zoneBounds: Record<Zone, [number, number]> = {
+      internet: [35, 415],
+      boundary: [485, 865],
+      internal: [935, 1315],
+    };
+    for (const zone of Object.keys(buckets) as Zone[]) {
+      const items = [...buckets[zone]].sort((a, b) => {
+        const ak = a.fold ? "fold" : a.kind;
+        const bk = b.fold ? "fold" : b.kind;
+        return ak.localeCompare(bk) || (a.fold ? a.key : a.node.label).localeCompare(b.fold ? b.key : b.node.label);
+      });
+      // Two generous columns keep long host names readable. A single column is
+      // used for short groups so the parent/child relationship remains obvious.
+      if (items.length <= 8) {
+        items.forEach((rn, index) => positions.set(rn.key, {
+          x: (zoneBounds[zone][0] + zoneBounds[zone][1]) / 2,
+          y: 90 + ((index + 1) * (virtualHeight - 150)) / (items.length + 1),
+        }));
+      } else {
+        const columns = [zoneBounds[zone][0] + 105, zoneBounds[zone][1] - 105];
+        const rows = Math.ceil(items.length / 2);
+        items.forEach((rn, index) => positions.set(rn.key, {
+          x: columns[index % 2],
+          y: 90 + ((Math.floor(index / 2) + 1) * (virtualHeight - 150)) / (rows + 1),
+        }));
+      }
+    }
+  } else {
+    const byKind = new Map<Kind, RenderNode[]>();
+    for (const rn of renderNodes) {
+      const group = byKind.get(rn.kind);
+      if (group) group.push(rn);
+      else byKind.set(rn.kind, [rn]);
+    }
+    for (const [kind, items] of byKind) {
+      const center = xByAssetKind[kind] ?? 600;
+      const width = items.length > 1 ? 180 : 0;
+      placeGrid(items, center - width / 2, center + width / 2);
+    }
   }
   return renderNodes.map((rn) => {
     const position = positions.get(rn.key) ?? { x: 600, y: virtualHeight / 2 };
@@ -324,7 +391,7 @@ function toG6Nodes(
         fold: true,
         tested: false,
         inScope: false,
-        lbl: viewMode === "network" && rn.kind === "endpoint" ? "" : `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
+        lbl: `还有 ${rn.hidden.length} 个${kindMeta[rn.kind].label}`,
         size: 24,
         active: activeKeys.has(rn.key),
         iconSrc: FOLD_ICON,
@@ -338,7 +405,7 @@ function toG6Nodes(
       fold: false,
       tested: rn.node.tested,
       inScope: rn.node.in_scope,
-      lbl: trunc(graphLabel(rn.node, viewMode) || kindMeta[rn.kind].label),
+        lbl: `${rn.node.tested ? "✓ " : ""}${trunc(graphLabel(rn.node, viewMode) || kindMeta[rn.kind].label, viewMode === "network" ? (rn.kind === "service" ? 22 : 18) : 26)}`,
       size: kindMeta[rn.kind].size,
       active: activeKeys.has(rn.key),
       iconSrc: viewMode === "network" && databaseEngine(rn.node)
@@ -353,7 +420,7 @@ function toG6Nodes(
 function networkWorldHeight(renderNodes: RenderNode[]): number {
   const counts: Record<Zone, number> = { internet: 0, boundary: 0, internal: 0 };
   for (const node of renderNodes) counts[node.fold ? "boundary" : zoneOf(node.node)] += 1;
-  return Math.max(760, Math.max(counts.internet, counts.boundary, counts.internal, 1) * 42);
+  return Math.max(760, Math.max(Math.ceil(counts.internet / 2), Math.ceil(counts.boundary / 2), Math.ceil(counts.internal / 2), 1) * 78 + 120);
 }
 
 // G6 的类型把自定义字段归在 data 下，但官方 force 示例（及运行时）按顶层读 d.<field>。
@@ -717,15 +784,13 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
   const { renderNodes, renderEdges } = React.useMemo(
     () =>
       data
-        ? computeVisible(data.nodes, data.edges, expanded)
+        ? computeVisible(data.nodes, data.edges, expanded, viewMode === "network")
         : { renderNodes: [] as RenderNode[], renderEdges: [] as CoverageGraphEdge[] },
-    [data, expanded],
+    [data, expanded, viewMode],
   );
 
   const displayNodes = React.useMemo(
-    () => viewMode === "network"
-      ? renderNodes.filter((node) => node.kind !== "endpoint")
-      : renderNodes,
+    () => renderNodes,
     [renderNodes, viewMode],
   );
   const displayNodeKeys = React.useMemo(() => new Set(displayNodes.map((node) => node.key)), [displayNodes]);
@@ -734,6 +799,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     [displayNodeKeys, renderEdges],
   );
   const worldHeight = React.useMemo(() => networkWorldHeight(displayNodes), [displayNodes]);
+  const zoneCounts = React.useMemo(() => {
+    const counts: Record<Zone, number> = { internet: 0, boundary: 0, internal: 0 };
+    for (const node of displayNodes) counts[node.fold ? "boundary" : zoneOf(node.node)] += 1;
+    return counts;
+  }, [displayNodes]);
 
   // 结构签名：只在可见节点/边集合变化时重建图 + 重跑布局，避免无谓抖动。
   const sig = React.useMemo(
@@ -807,13 +877,13 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             size: (d: unknown) => nd(d).size,
             fill: (d: unknown) => nodeFill(nd(d)),
             stroke: (d: unknown) => nodeStroke(nd(d)),
-            lineWidth: (d: unknown) => (nd(d).fold || !nd(d).inScope ? 1 : 1.5),
+            lineWidth: (d: unknown) => (nd(d).fold || !nd(d).inScope ? 1 : nd(d).tested ? 3 : 1.5),
             lineDash: (d: unknown) => (nd(d).fold || !nd(d).inScope ? [3, 3] : [0]),
             iconSrc: (d: unknown) => nd(d).iconSrc,
             iconWidth: (d: unknown) => Math.max(12, nd(d).size * 0.55),
             iconHeight: (d: unknown) => Math.max(12, nd(d).size * 0.55),
             labelText: (d: unknown) => nd(d).lbl,
-            labelFontSize: 10,
+            labelFontSize: () => (viewModeRef.current === "network" ? 9 : 10),
             labelPlacement: "bottom",
             labelFill: "#475569",
             labelBackground: true,
@@ -830,7 +900,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             lineWidth: (d: unknown) => ((d as G6EdgeDatum).active ? 2.5 : 1),
             opacity: (d: unknown) =>
               gDataRef.current.edges.some((edge) => edge.active) && !(d as G6EdgeDatum).active ? 0.18 : 1,
-            endArrow: true,
+            endArrow: () => viewModeRef.current === "asset",
           },
         },
         behaviors: ["drag-element", "drag-canvas", "zoom-canvas"],
@@ -923,6 +993,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
                   <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
                   <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
                 </div>
+                {zoneCounts[zone] === 0 && (
+                  <div className="text-muted-foreground/70 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-md border border-dashed border-slate-300/70 px-3 py-2 text-center text-xs dark:border-slate-700/70">
+                    暂无该区域资产证据
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -1027,7 +1102,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           </Button>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-          {(Object.keys(kindMeta) as Kind[]).filter((k) => viewMode === "asset" || k !== "endpoint").map((k) => {
+          {(Object.keys(kindMeta) as Kind[]).map((k) => {
             const m = kindMeta[k];
             const Icon = m.icon;
             return (
@@ -1044,7 +1119,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           {coverageEnabled && (
             <>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-3 rounded-full bg-emerald-500" /> 已测（高亮）
+                <span className="flex size-3 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white">✓</span> 已测（绿色描边）
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="size-3 rounded-full bg-neutral-400" /> 未测
@@ -1067,7 +1142,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         )}
         <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
           {viewMode === "network"
-            ? "网络拓扑梳理会话会输出资产关系结果和网络拓扑结果；图中只展示有真实资产证据的节点及区域。"
+            ? "图中只展示有真实资产证据的节点；连线表示资产归属/关联，不代表已验证的网络通信路径。"
             : "资产关系图直接读取资产库，不需要额外梳理；点击节点查看详情并高亮关系链。灰色「⋯」可展开更多资产。"}
         </p>
         </>}

@@ -30,6 +30,12 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	message := fmt.Sprintf(`请重新梳理任务 #%d 的网络拓扑，并在同一次会话中输出两份相互独立的结果。
 
+三层区域是本任务拓扑的硬约束，不是可忽略的排版：
+- internet（互联网区）：公网根域、子域名、公共 IP 和外部入口。
+- boundary（边界区）：对外暴露的服务、网关、Web 应用或端点；只有存在公开主机/URL证据时才归入此层。
+- internal（内网区）：私有 IP、回环/链路本地地址及其承载的业务应用、端点和数据库。
+节点摘要中的 zone/zone_reason 是后端根据真实地址和资产证据计算的权威归类；不得仅按 kind 改写区域。没有 zone 或证据不足时必须标记“待确认”，不能臆造跨区连接。
+
 输出必须严格使用下面两个一级标题，不能合并成一份：
 ## 资产关系结果
 - 只根据当前任务及其直接关联任务的真实资产数据，保留资产库中的层级和归属关系。
@@ -43,9 +49,9 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 	if as := s.m.Assets(); as != nil {
 		if graph, err := as.BuildCoverageGraph(taskID, t.ExpID); err == nil {
 			type nodeSample struct {
-				Key, Kind, Label, Domain, IP string
-				Port                         int
-				Tested, InScope              bool
+				Key, Kind, Label, Domain, IP, Zone, ZoneReason string
+				Port                                           int
+				Tested, InScope                                bool
 			}
 			counts := map[string]int{}
 			sample := make([]nodeSample, 0, 60)
@@ -55,6 +61,7 @@ func (s *Server) taskAssetMapping(w http.ResponseWriter, r *http.Request) {
 					sample = append(sample, nodeSample{
 						Key: node.Key, Kind: node.Kind, Label: node.Label, Domain: node.Domain,
 						IP: node.IP, Port: node.Port, Tested: node.Tested, InScope: node.InScope,
+						Zone: node.Zone, ZoneReason: node.ZoneReason,
 					})
 				}
 			}

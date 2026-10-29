@@ -327,6 +327,8 @@ export interface CoverageGraphNode {
   app_name?: string;
   page_title?: string;
   status_code?: number;
+  zone?: "internet" | "boundary" | "internal";
+  zone_reason?: string;
 }
 
 export interface CoverageGraphEdge {
@@ -974,6 +976,8 @@ export interface Settings {
   browser_screenshot_enabled?: boolean;
   /** 是否在报告截图右上角显示截图保存时间。默认关闭。 */
   browser_screenshot_timestamp_enabled?: boolean;
+  /** 是否向 Agent 注入统一 OPSEC 准则。默认关闭。 */
+  opsec_enabled?: boolean;
   credential_agent_enabled: boolean;
   credential_traffic_binding: boolean;
   task_intelligence_enabled: boolean; // 默认关闭；关闭不注入情报工具或提示

@@ -5,15 +5,15 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeftIcon, ArrowUpRightIcon, FileTextIcon, Loader2Icon, ShieldAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowUpRightIcon, BotIcon, FileTextIcon, Loader2Icon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
-import { FindingRetestPanel } from "@/components/finding-retest-panel";
+import { FindingAutoChat } from "@/components/finding-auto-chat";
 import { FindingReproductionPanel } from "@/components/finding-reproduction-panel";
+import { FindingRetestPanel } from "@/components/finding-retest-panel";
 import { FindingTrafficPanel } from "@/components/finding-traffic-panel";
 import { Markdown } from "@/components/markdown";
-import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,6 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useSideQuestions } from "@/hooks/use-side-questions";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingStatus, Severity } from "@/lib/types";
@@ -72,7 +71,8 @@ function FindingDetailInner() {
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
   const [reportGenerating, setReportGenerating] = React.useState(false);
-  const side = useSideQuestions(finding?.task_id ? `/api/tasks/${finding.task_id}/chat` : null);
+  const [autoChatOpen, setAutoChatOpen] = React.useState(false);
+  const title = finding?.name || finding?.vulnclass || "未分类";
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -155,17 +155,10 @@ function FindingDetailInner() {
     );
   }
 
-  const title = finding.name || finding.vulnclass || "未分类";
   const structuredReproduction = usesStructuredReproduction(finding.report || "");
 
   return (
-    <SideQuestionWorkspace
-      side={side}
-      label={`漏洞 #${finding.id} · ${title}`}
-      mode="floating"
-      suggestions={["请解释这个漏洞的影响范围和利用条件。", "请根据当前证据检查这个漏洞是否足以确认。", "请给出可执行的修复建议。"]}
-      placeholder="询问当前漏洞…"
-    >
+    <>
       <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
       {/* Sticky header */}
       <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
@@ -193,7 +186,10 @@ function FindingDetailInner() {
           <Separator orientation="vertical" className="mx-1 h-4" />
           <StatusBadge domain="severity" value={finding.severity} dot />
           <StatusBadge domain="finding" value={finding.status} dot />
-          <SideQuestionButton side={side} label="询问漏洞" />
+          <Button variant="outline" size="sm" onClick={() => setAutoChatOpen(true)} title="在当前页面打开 Auto Agent 对话">
+            <BotIcon data-icon="inline-start" />
+            询问 Auto Agent
+          </Button>
           {finding.inherited && finding.source_task_id && (
             <Badge variant="outline">来源任务 #{finding.source_task_id} · 只读</Badge>
           )}
@@ -408,7 +404,13 @@ function FindingDetailInner() {
         </TabsContent>
       </div>
       </Tabs>
-    </SideQuestionWorkspace>
+      <FindingAutoChat
+        findingId={finding.id}
+        findingTitle={title}
+        open={autoChatOpen}
+        onOpenChange={setAutoChatOpen}
+      />
+    </>
   );
 }
 

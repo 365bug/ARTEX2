@@ -190,6 +190,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	// Wire DB-stored prompt templates into the agents (新版方案 §3.3 / §5a). With no
 	// override row, agents keep their built-in defaults — behavior is unchanged.
 	if m.pg != nil {
+		agent.OpsecEnabled = func() bool { return m.pg.GetBool(settingOpsecEnabled, false) }
 		agent.PromptOverride = func(key string) (string, bool) {
 			a, err := m.pg.GetAgentByKey(key)
 			if err != nil || a == nil {
@@ -3510,6 +3511,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"traffic_capture":                      s.m.TrafficEnabled(),
 		"browser_screenshot_enabled":           s.m.pg.GetBool(settingBrowserScreenshot, false),
 		"browser_screenshot_timestamp_enabled": s.m.pg.GetBool(settingScreenshotTimestamp, false),
+		"opsec_enabled":                        s.m.pg.GetBool(settingOpsecEnabled, false),
 		"agent_traffic_binding":                s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"task_intelligence_enabled":            s.m.pg.GetBool(db.SettingTaskIntelligence, false),
 		db.SettingTaskAutoTitle:                s.m.pg.GetBool(db.SettingTaskAutoTitle, false),
@@ -3589,6 +3591,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		TrafficCapture      *bool `json:"traffic_capture"`
 		BrowserScreenshot   *bool `json:"browser_screenshot_enabled"`
 		ScreenshotTimestamp *bool `json:"browser_screenshot_timestamp_enabled"`
+		OpsecEnabled        *bool `json:"opsec_enabled"`
 		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
 		TaskIntelligence    *bool `json:"task_intelligence_enabled"`
 		TaskAutoTitle       *bool `json:"task_auto_title_enabled"`
@@ -3800,6 +3803,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ScreenshotTimestamp != nil {
 		if err := s.m.pg.SetBool(settingScreenshotTimestamp, *req.ScreenshotTimestamp); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.OpsecEnabled != nil {
+		if err := s.m.pg.SetBool(settingOpsecEnabled, *req.OpsecEnabled); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
