@@ -152,7 +152,7 @@ export function RepeaterTextPane({
           <div
             ref={syntax}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 right-0 left-12 overflow-hidden px-3 py-2 font-mono text-xs leading-5 group-focus-within:invisible"
+            className="pointer-events-none absolute inset-y-0 right-0 left-12 z-20 overflow-hidden px-3 py-2 font-mono text-xs leading-5 group-focus-within:invisible"
           >
             <HttpPacketSyntax
               raw={value}
