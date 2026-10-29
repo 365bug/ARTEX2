@@ -846,6 +846,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/lineage", s.findingLineage)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/deepen", s.deepenFinding)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/generate-report", s.generateFindingReport)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/retests", s.listFindingRetests)
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
@@ -3273,7 +3274,30 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 100)
-	ex, matched, _ := tr.Page(traffic.PageQuery{
+	var taskHosts []string
+	taskScoped := false
+	if rawTaskID := strings.TrimSpace(q.Get("task_id")); rawTaskID != "" {
+		taskScoped = true
+		taskID, err := strconv.ParseInt(rawTaskID, 10, 64)
+		if err != nil || taskID <= 0 || s.m.ResolveTask(rawTaskID) == nil {
+			writeErr(w, http.StatusNotFound, "task not found")
+			return
+		}
+		taskHosts, err = s.m.Assets().HostsByTaskWithSources(taskID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if taskScoped && len(taskHosts) == 0 {
+		writeJSON(w, 200, map[string]any{
+			"enabled": s.m.TrafficEnabled(), "proxy": s.m.ProxyAddr(), "count": 0,
+			"total": 0, "page": page, "size": size, "exchanges": []any{},
+		})
+		return
+	}
+	pageQuery := traffic.PageQuery{
+		Hosts:   taskHosts,
 		Host:    q.Get("host"),
 		Method:  q.Get("method"),
 		Query:   q.Get("q"),
@@ -3284,8 +3308,14 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 		RespMax: int64(atoiDefault(q.Get("resp_max"), -1)),
 		Sort:    q.Get("sort"),
 		Order:   q.Get("order"),
-	}, page, size)
+	}
+	ex, matched, _ := tr.Page(pageQuery, page, size)
 	count, _ := tr.Count() // global total, for the stat card
+	if taskScoped {
+		// matched already represents the current task scope plus all active
+		// filters. Reusing it avoids a second full SQLite scan on every refresh.
+		count = matched
+	}
 	writeJSON(w, 200, map[string]any{
 		"enabled":   s.m.TrafficEnabled(), // reflect the capture toggle
 		"proxy":     s.m.ProxyAddr(),
@@ -3305,12 +3335,33 @@ func (s *Server) getTrafficHosts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"hosts": []any{}})
 		return
 	}
-	hosts, err := tr.Hosts()
+	var hosts []string
+	if rawTaskID := strings.TrimSpace(r.URL.Query().Get("task_id")); rawTaskID != "" {
+		taskID, err := strconv.ParseInt(rawTaskID, 10, 64)
+		if err != nil || taskID <= 0 || s.m.ResolveTask(rawTaskID) == nil {
+			writeErr(w, http.StatusNotFound, "task not found")
+			return
+		}
+		hosts, err = s.m.Assets().HostsByTaskWithSources(taskID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	var result []traffic.HostCount
+	var err error
+	if len(hosts) > 0 {
+		result, err = tr.HostsForScope(hosts)
+	} else if r.URL.Query().Get("task_id") != "" {
+		result = []traffic.HostCount{}
+	} else {
+		result, err = tr.Hosts()
+	}
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"hosts": hosts})
+	writeJSON(w, 200, map[string]any{"hosts": result})
 }
 
 // deleteTraffic removes recorded traffic for every host containing the query's

@@ -5,7 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeftIcon, ArrowUpRightIcon, ShieldAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowUpRightIcon, FileTextIcon, Loader2Icon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
@@ -71,6 +71,7 @@ function FindingDetailInner() {
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
+  const [reportGenerating, setReportGenerating] = React.useState(false);
   const side = useSideQuestions(finding?.task_id ? `/api/tasks/${finding.task_id}/chat` : null);
 
   const load = React.useCallback(() => {
@@ -121,6 +122,23 @@ function FindingDetailInner() {
     },
     [finding, id],
   );
+
+  const generateReport = React.useCallback(async () => {
+    if (!finding || finding.inherited || reportGenerating) return;
+    setReportGenerating(true);
+    try {
+      await api.generateFindingReport(id);
+      toast.success("已提交生成请求，报告 Agent 将补全步骤与详细报告");
+      // The reporter runs asynchronously. Refresh once after it has had a
+      // chance to persist the report, while keeping the button available if
+      // the run is delayed or interrupted.
+      window.setTimeout(() => void load(), 2000);
+    } catch (e) {
+      toast.error("提交生成请求失败：" + (e as Error).message);
+    } finally {
+      setReportGenerating(false);
+    }
+  }, [finding, id, load, reportGenerating]);
 
   if (!finding) {
     return (
@@ -226,16 +244,27 @@ function FindingDetailInner() {
                     readOnly={finding.inherited}
                     onChanged={load}
                   />
-                  <FindingRetestPanel
-                    key={`retest:${id}`}
-                    findingId={id}
-                    readOnly={finding.inherited}
-                    onCompleted={load}
-                  />
                   <Card>
                     <CardHeader className="flex-row items-center justify-between">
                       <CardTitle className="text-sm">详细报告</CardTitle>
-                      {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}
+                        {!finding.inherited ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void generateReport()}
+                            disabled={reportGenerating}
+                          >
+                            {reportGenerating ? (
+                              <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                            ) : (
+                              <FileTextIcon data-icon="inline-start" />
+                            )}
+                            {finding.report ? "重新生成步骤与报告" : "生成步骤与报告"}
+                          </Button>
+                        ) : null}
+                      </div>
                     </CardHeader>
                     <CardContent>
                       {finding.report_stale ? (
