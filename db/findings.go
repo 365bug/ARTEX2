@@ -160,6 +160,8 @@ type FindingFilter struct {
 	Query         string // 名称/类型/摘要/证据/报告正文的模糊检索关键词
 	Sort          string // "severity" | "time"
 	TimeDirection string // "asc" | "desc"; applies to time, not the severity ranking
+	From          string // RFC3339 timestamp, inclusive
+	To            string // RFC3339 timestamp, inclusive
 	// AssetScope 是资产树的节点 key(a:<id> / c:<id> / r:<domain> / __none__),
 	// 选中一个节点等于选中它的整棵子树。空 = 不按资产筛选。
 	AssetScope string
@@ -199,6 +201,18 @@ func (f FindingFilter) where() (string, []any) {
 	add("severity", f.Severity)
 	add("status", f.Status)
 	add("vulnclass", f.VulnClass)
+	if from := strings.TrimSpace(f.From); from != "" {
+		if parsed, err := time.Parse(time.RFC3339, from); err == nil {
+			args = append(args, parsed)
+			conds = append(conds, fmt.Sprintf("f.created_at >= $%d", len(args)))
+		}
+	}
+	if to := strings.TrimSpace(f.To); to != "" {
+		if parsed, err := time.Parse(time.RFC3339, to); err == nil {
+			args = append(args, parsed)
+			conds = append(conds, fmt.Sprintf("f.created_at <= $%d", len(args)))
+		}
+	}
 	// task_id 是 bigint 列,按整数比较(不能走上面的文本 add);空/非法值忽略。
 	if f.TaskID == FindingUnassignedTask {
 		conds = append(conds, "(f.task_id IS NULL OR t.id IS NULL)")
