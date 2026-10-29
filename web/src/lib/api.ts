@@ -715,7 +715,7 @@ export const api = {
       `/exploration/findings/${id}${contextTaskId ? `?context_task=${encodeURIComponent(contextTaskId)}` : ""}`,
     ),
   generateFindingReport: (id: string) =>
-    post<{ queued: boolean; finding_id: number; finding_node_id: number }>(
+    post<{ queued: boolean; agent_key: "reporter"; finding_id: number; finding_node_id: number }>(
       `/exploration/findings/${encodeURIComponent(id)}/generate-report`,
       {},
     ),

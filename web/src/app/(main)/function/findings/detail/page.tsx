@@ -255,6 +255,7 @@ function FindingDetailInner() {
                             size="sm"
                             onClick={() => void generateReport()}
                             disabled={reportGenerating}
+                            title="由报告撰写 Agent 生成，不使用 Auto Agent"
                           >
                             {reportGenerating ? (
                               <Loader2Icon data-icon="inline-start" className="animate-spin" />

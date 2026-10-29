@@ -69,6 +69,7 @@ func (s *Server) generateFindingReport(w http.ResponseWriter, r *http.Request) {
 	)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"queued":          true,
+		"agent_key":       "reporter",
 		"finding_id":      f.ID,
 		"finding_node_id": *f.NodeID,
 	})

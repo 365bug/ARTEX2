@@ -350,6 +350,12 @@ function toG6Nodes(
   });
 }
 
+function networkWorldHeight(renderNodes: RenderNode[]): number {
+  const counts: Record<Zone, number> = { internet: 0, boundary: 0, internal: 0 };
+  for (const node of renderNodes) counts[node.fold ? "boundary" : zoneOf(node.node)] += 1;
+  return Math.max(760, Math.max(counts.internet, counts.boundary, counts.internal, 1) * 42);
+}
+
 // G6 的类型把自定义字段归在 data 下，但官方 force 示例（及运行时）按顶层读 d.<field>。
 // 回调形参用 unknown 满足 G6 签名，内部用 nd() 强转回我们的顶层结构。
 const nd = (d: unknown) => d as G6NodeDatum;
@@ -727,6 +733,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     () => renderEdges.filter((edge) => displayNodeKeys.has(edge.src) && displayNodeKeys.has(edge.dst)),
     [displayNodeKeys, renderEdges],
   );
+  const worldHeight = React.useMemo(() => networkWorldHeight(displayNodes), [displayNodes]);
 
   // 结构签名：只在可见节点/边集合变化时重建图 + 重跑布局，避免无谓抖动。
   const sig = React.useMemo(
@@ -900,8 +907,9 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       {viewMode === "network" ? (
         <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
           <div
-            className="absolute top-12 left-0 grid h-[8000px] w-[1350px] grid-cols-3"
+            className="absolute top-0 left-0 grid w-[1350px] grid-cols-3"
             style={{
+              height: worldHeight,
               transform: `translate(${viewport.position[0]}px, ${viewport.position[1]}px) scale(${viewport.zoom})`,
               transformOrigin: "0 0",
             }}
@@ -910,14 +918,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
               <div
                 key={zone}
                 className={cn("relative border-r border-slate-200/80 dark:border-slate-800/80", zoneMeta[zone].className, index === 2 && "border-r-0")}
-              />
-            ))}
-          </div>
-          <div className="absolute top-3 left-0 z-10 grid w-full grid-cols-3 px-4">
-            {(Object.keys(zoneMeta) as Zone[]).map((zone) => (
-              <div key={zone} className="min-w-0">
-                <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
-                <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
+              >
+                <div className="absolute top-3 left-4">
+                  <div className="text-foreground/80 text-sm font-semibold">{zoneMeta[zone].label}</div>
+                  <div className="text-muted-foreground mt-0.5 text-[11px]">{zoneMeta[zone].description}</div>
+                </div>
               </div>
             ))}
           </div>
