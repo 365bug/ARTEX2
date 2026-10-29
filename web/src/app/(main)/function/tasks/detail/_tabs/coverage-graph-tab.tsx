@@ -787,6 +787,11 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       graph = new Graph({
         container: containerRef.current,
         autoResize: true,
+        // Keep wheel/trackpad zoom within a readable range. Very small zoom
+        // values make labels and the fixed network zones appear to collapse
+        // into a single strip; an upper bound also prevents focusElement from
+        // pushing the selected node underneath the overlay panel.
+        zoomRange: [0.35, 3],
         // Asset mode explicitly centers after rendering. Network mode keeps
         // its fixed world coordinates so the three background zones align.
         background: "transparent",
@@ -824,6 +829,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
         behaviors: ["drag-element", "drag-canvas", "zoom-canvas"],
       });
       graph.on("aftertransform", syncViewport);
+      graph.on("afterresize", syncViewport);
       graph.on("node:click", (evt: unknown) => {
         const id = (evt as { target?: { id?: string } }).target?.id;
         if (!id) return;
@@ -861,7 +867,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       graph?.destroy();
       graphRef.current = null;
     };
-  }, [applyData, syncViewport]);
+  }, [applyData, resetView, syncViewport]);
 
   // 可见集合变化 → 重新灌数据 + 布局。sig 只作为重排触发器（applyData 读 gDataRef）。
   // biome-ignore lint/correctness/useExhaustiveDependencies: sig 是刻意的重排触发依赖
@@ -1075,7 +1081,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
               className="h-7 px-2 text-xs"
               onClick={() => {
                 setActivePath([]);
-                void graphRef.current?.fitCenter();
+                void resetView();
               }}
             >
               清除高亮

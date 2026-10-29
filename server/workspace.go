@@ -244,6 +244,16 @@ func (s *Server) wsPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fi, err := os.Stat(abs)
+	// Reports use the workspace-relative canonical path
+	// findings/screenshots/finding-<node>-step-<n>.png, while the files live
+	// under the per-conversation session directory. Resolve that exact suffix
+	// in the newest matching session so the links stay portable across reports.
+	if (err != nil || fi.IsDir()) && !filepath.IsAbs(rawPath) {
+		if fallback, found := s.findSessionPreview(rawPath); found {
+			abs = fallback
+			fi, err = os.Stat(abs)
+		}
+	}
 	if err != nil || fi.IsDir() {
 		writeErr(w, 404, "文件不存在")
 		return
@@ -253,8 +263,43 @@ func (s *Server) wsPreview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 415, "仅支持图片预览")
 		return
 	}
+	if s.m.pg.GetBool(settingScreenshotTimestamp, false) {
+		rawRel := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(rawPath), "/"))
+		rel := filepath.ToSlash(s.wsRel(abs))
+		if strings.HasPrefix(rawRel, "findings/screenshots/") || strings.HasPrefix(rel, "findings/screenshots/") || strings.Contains(rel, "/findings/screenshots/") {
+			// The frontend renders this as a small top-right overlay. Use the
+			// file mtime so the label reflects capture/save time, not view time.
+			w.Header().Set("X-Report-Screenshot-Timestamp", fi.ModTime().Format("2006-01-02 15:04:05"))
+		}
+	}
 	w.Header().Set("Content-Disposition", "inline; filename=\""+sanitizeFilename(filepath.Base(abs))+"\"")
 	http.ServeFile(w, r, abs)
+}
+
+func (s *Server) findSessionPreview(rawPath string) (string, bool) {
+	rel := filepath.Clean(strings.TrimPrefix(strings.TrimSpace(rawPath), "/"))
+	const prefix = "findings" + string(os.PathSeparator) + "screenshots" + string(os.PathSeparator)
+	if rel == "." || !strings.HasPrefix(rel, prefix) || strings.Contains(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	base := filepath.Join(filepath.Clean(s.m.dir), "sessions")
+	matches, err := filepath.Glob(filepath.Join(base, "*", filepath.FromSlash(rel)))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	var newest string
+	var newestTime int64
+	for _, candidate := range matches {
+		info, statErr := os.Stat(candidate)
+		if statErr != nil || info.IsDir() {
+			continue
+		}
+		mtime := info.ModTime().UnixNano()
+		if newest == "" || mtime > newestTime {
+			newest, newestTime = candidate, mtime
+		}
+	}
+	return newest, newest != ""
 }
 
 // POST /api/workspace/upload?path=<dir> — multipart form field "file" (one or more).

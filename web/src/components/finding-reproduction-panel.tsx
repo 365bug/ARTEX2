@@ -208,7 +208,9 @@ export function FindingReproductionPanel({ finding, contextTask }: { finding: Fi
     [finding.evidence, finding.report, finding.summary],
   );
   const [traffic, setTraffic] = React.useState<FindingTrafficBinding[] | undefined>(undefined);
-  const overview = reportSection(finding.report ?? "", ["概述", "影响与危害", "受影响范围"]);
+  const overviewSections = ["概述", "影响与危害", "受影响范围"]
+    .map((heading) => ({ heading, content: reportSection(finding.report ?? "", [heading]) }))
+    .filter((item) => item.content);
   const outcome = reportSection(finding.report ?? "", ["最终结果"]);
   const rootCause = reportSection(finding.report ?? "", ["根因分析"]);
   const remediation = reportSection(finding.report ?? "", ["修复建议"]);
@@ -242,11 +244,11 @@ export function FindingReproductionPanel({ finding, contextTask }: { finding: Fi
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {overview ? (
-          <div className="rounded-lg bg-muted/30 px-3 py-2.5 text-sm">
-            <Markdown text={overview} />
+        {overviewSections.map((section) => (
+          <div key={section.heading} className="rounded-lg bg-muted/30 px-3 py-2.5 text-sm">
+            <Markdown text={`## ${section.heading}\n\n${section.content}`} />
           </div>
-        ) : null}
+        ))}
         {steps.map((step, index) => {
           const binding = traffic?.find((item) => item.position === index) ?? traffic?.[index];
           return (

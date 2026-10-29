@@ -972,6 +972,8 @@ export interface Settings {
   traffic_capture: boolean;
   /** 是否向可见 Agent 暴露浏览器 MCP 的截图工具。默认关闭。 */
   browser_screenshot_enabled?: boolean;
+  /** 是否在报告截图右上角显示截图保存时间。默认关闭。 */
+  browser_screenshot_timestamp_enabled?: boolean;
   credential_agent_enabled: boolean;
   credential_traffic_binding: boolean;
   task_intelligence_enabled: boolean; // 默认关闭；关闭不注入情报工具或提示

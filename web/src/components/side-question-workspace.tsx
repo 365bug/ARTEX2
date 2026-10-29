@@ -248,6 +248,7 @@ export function SideQuestionWorkspace({
   side,
   label,
   children,
+  mode = "split",
   composerLayout = "stacked",
   suggestions,
   placeholder,
@@ -257,6 +258,7 @@ export function SideQuestionWorkspace({
   side: SideQuestions;
   label: string;
   children: ReactNode;
+  mode?: "split" | "floating";
   composerLayout?: ComposerLayout;
   suggestions?: string[];
   placeholder?: string;
@@ -265,9 +267,25 @@ export function SideQuestionWorkspace({
 }) {
   const mobile = useIsMobile();
   const desktopSideOpen = side.open && side.enabled && !mobile;
+  const floatingSideOpen = desktopSideOpen && mode === "floating";
   return (
     <>
-      {desktopSideOpen ? (
+      {floatingSideOpen ? (
+        <>
+          <div className={cn("min-h-0 min-w-0 flex-1", className, mainClassName)}>{children}</div>
+          <div className="pointer-events-none fixed inset-x-0 top-20 z-40 flex justify-end px-4 pb-4 sm:px-6">
+            <div className="pointer-events-auto h-[calc(100svh-6rem)] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-xl border bg-background shadow-2xl">
+              <SidePanel
+                side={side}
+                label={label}
+                composerLayout={composerLayout}
+                suggestions={suggestions}
+                placeholder={placeholder}
+              />
+            </div>
+          </div>
+        </>
+      ) : desktopSideOpen ? (
         <ResizablePanelGroup orientation="horizontal" className={cn("min-h-0 min-w-0 flex-1", className)}>
           <ResizablePanel
             id="main-conversation"
