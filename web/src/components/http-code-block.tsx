@@ -185,7 +185,7 @@ export function HttpPacketSyntax({
           className={cn("grid min-w-0", lineClassName, lineNumbers && "grid-cols-[2.25rem_minmax(0,1fr)]")}
         >
           {lineNumbers ? (
-            <span className="sticky left-0 self-stretch border-r bg-muted/20 px-1 text-right text-[11px] text-muted-foreground/50">
+            <span className="sticky left-0 self-stretch select-none border-r bg-muted/20 px-1 text-right text-[11px] text-muted-foreground/50">
               {index + 1}
             </span>
           ) : null}
